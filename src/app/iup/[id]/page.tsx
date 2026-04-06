@@ -997,12 +997,6 @@ export default function IupPlanPage() {
     );
     return [step0Complete, step1Complete, step2Complete, true] as const;
   }, [longGoals, nowState, shortGoals]);
-  const maxUnlockedStep = useMemo(() => {
-    if (!stepCompletion[0]) return 0;
-    if (!stepCompletion[1]) return 1;
-    if (!stepCompletion[2]) return 2;
-    return 3;
-  }, [stepCompletion]);
   const currentStepComplete = useMemo(() => stepCompletion[step], [step, stepCompletion]);
   const stepProgress = useMemo(
     () => ((step + 1) / stepLabels.length) * 100,
@@ -1335,14 +1329,8 @@ export default function IupPlanPage() {
     router.push("/");
   };
   const onSelectStep = (index: number) => {
-    if (index <= maxUnlockedStep) {
-      setStep(index);
-      setStatus(null);
-      return;
-    }
-    setStatus(
-      `Slutför steg ${maxUnlockedStep + 1} (${stepLabels[maxUnlockedStep]}) innan du går vidare.`
-    );
+    setStep(index);
+    setStatus(null);
   };
   const onSelectReviewPoint = (nextId: string) => {
     if (!nextId || nextId === selectedReviewPointId) {
@@ -1674,15 +1662,13 @@ export default function IupPlanPage() {
             <div className="step-grid">
               {stepLabels.map((label, index) => {
                 const isCurrent = index === step;
-                const isDone = index < step;
-                const isLocked = index > maxUnlockedStep;
+                const isDone = stepCompletion[index];
                 return (
                   <button
                     key={label}
                     type="button"
                     onClick={() => onSelectStep(index)}
-                    disabled={isLocked}
-                    className={`step-btn${isCurrent ? " current" : ""}${isDone ? " done" : ""}${isLocked ? " locked" : ""}`}
+                    className={`step-btn${isCurrent ? " current" : ""}${isDone ? " done" : ""}`}
                   >
                     <span className="step-index">
                       {index + 1}
@@ -2074,10 +2060,6 @@ export default function IupPlanPage() {
                   if (error) {
                     return;
                   }
-                  if (!currentStepComplete) {
-                    setStatus(`Slutför ${stepLabels[step]} innan du går vidare.`);
-                    return;
-                  }
                   if (step === 3) {
                     onComplete();
                     return;
@@ -2085,7 +2067,7 @@ export default function IupPlanPage() {
                   setStep((current) => Math.min(3, current + 1));
                   setStatus(null);
                 }}
-                disabled={!currentStepComplete || saving || !!error}
+                disabled={saving || !!error}
               >
                 {step === 3 ? "Klar" : `Nästa${nextStepLabel ? `: ${nextStepLabel}` : ""}`}
               </button>
