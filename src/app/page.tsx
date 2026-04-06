@@ -121,6 +121,7 @@ export default function Page() {
   const [teams, setTeams] = useState<TeamLite[]>([]);
   const [players, setPlayers] = useState<PaidPlayer[]>([]);
   const [playerSearch, setPlayerSearch] = useState("");
+  const [playerClubFilter, setPlayerClubFilter] = useState("all");
   const [playerTeamFilter, setPlayerTeamFilter] = useState("all");
   const [playerPositionFilter, setPlayerPositionFilter] = useState("all");
   const [playerStatusFilter, setPlayerStatusFilter] = useState<PlayerStatusFilter>("all");
@@ -158,6 +159,23 @@ export default function Page() {
   );
 
   const playerTeams = useMemo(() => teams, [teams]);
+  const playerClubs = useMemo(() => {
+    const seen = new Set<string>();
+    return teams.flatMap((team) => {
+      if (!team.clubId || !team.clubName || seen.has(team.clubId)) {
+        return [];
+      }
+      seen.add(team.clubId);
+      return [{ id: team.clubId, name: team.clubName }];
+    });
+  }, [teams]);
+  const visibleTeamOptions = useMemo(
+    () =>
+      playerClubFilter === "all"
+        ? teams
+        : teams.filter((team) => team.clubId === playerClubFilter),
+    [playerClubFilter, teams]
+  );
 
   const playerPositions = useMemo(
     () =>
@@ -212,6 +230,7 @@ export default function Page() {
   const loadPaidPlayers = async () => {
     const result = await fetchPaidPlayers({
       search: deferredPlayerSearch,
+      clubId: playerClubFilter !== "all" ? playerClubFilter : undefined,
       teamId: playerTeamFilter !== "all" ? playerTeamFilter : undefined,
       positionLabel: playerPositionFilter !== "all" ? playerPositionFilter : undefined,
       status: playerStatusFilter,
@@ -252,6 +271,15 @@ export default function Page() {
     };
     loadTeamOptions();
   }, [isPaid, signedIn]);
+
+  useEffect(() => {
+    if (
+      playerTeamFilter !== "all" &&
+      !visibleTeamOptions.some((team) => team.id === playerTeamFilter)
+    ) {
+      setPlayerTeamFilter("all");
+    }
+  }, [playerTeamFilter, visibleTeamOptions]);
 
   useEffect(() => {
     const loadReviewIndicators = async () => {
@@ -652,13 +680,24 @@ export default function Page() {
               className="input-wide"
             />
             <select
+              value={playerClubFilter}
+              onChange={(event) => setPlayerClubFilter(event.target.value)}
+            >
+              <option value="all">Alla klubbar</option>
+              {playerClubs.map((club) => (
+                <option key={club.id} value={club.id}>
+                  {club.name}
+                </option>
+              ))}
+            </select>
+            <select
               value={playerTeamFilter}
               onChange={(event) => setPlayerTeamFilter(event.target.value)}
             >
               <option value="all">Alla lag</option>
-              {playerTeams.map((team) => (
+              {visibleTeamOptions.map((team) => (
                 <option key={team.id} value={team.id}>
-                  {team.name}
+                  {team.label}
                 </option>
               ))}
             </select>
@@ -710,7 +749,7 @@ export default function Page() {
                         <span className="review-now-badge">Återkoppling nu</span>
                       ) : null}
                       <div className="muted-sm">
-                        {player.positionLabel || "-"} · {player.teamName}
+                        {player.positionLabel || "-"} · {player.clubName ? `${player.clubName} / ` : ""}{player.teamName}
                       </div>
                     </button>
                     <button
@@ -732,16 +771,19 @@ export default function Page() {
                     </h4>
                     <div className="form-stack">
                       <span>
-                        <strong>Team:</strong> {selectedPlayer.teamName}
+                        <strong>Klubb:</strong> {selectedPlayer.clubName || "-"}
                       </span>
                       <span>
-                        <strong>Number:</strong> {selectedPlayer.number > 0 ? selectedPlayer.number : "-"}
+                        <strong>Lag:</strong> {selectedPlayer.clubName ? `${selectedPlayer.clubName} / ${selectedPlayer.teamName}` : selectedPlayer.teamName}
+                      </span>
+                      <span>
+                        <strong>Nummer:</strong> {selectedPlayer.number > 0 ? selectedPlayer.number : "-"}
                       </span>
                       <span>
                         <strong>Position:</strong> {selectedPlayer.positionLabel || "-"}
                       </span>
                       <span>
-                        <strong>Status:</strong> {selectedPlayer.isActive ? "Active" : "Inactive"}
+                        <strong>Status:</strong> {selectedPlayer.isActive ? "Aktiv" : "Inaktiv"}
                       </span>
                     </div>
 
@@ -799,6 +841,17 @@ export default function Page() {
             <div className="row row-between">
               <h3 className="section-h3">Skapa IUP: {createDialogPlayer.name}</h3>
               <button type="button" onClick={closeCreateIupDialog}>Stäng</button>
+            </div>
+            <div className="form-stack">
+              <span>
+                <strong>Klubb:</strong> {createDialogPlayer.clubName || "-"}
+              </span>
+              <span>
+                <strong>Lag:</strong> {createDialogPlayer.clubName ? `${createDialogPlayer.clubName} / ${createDialogPlayer.teamName}` : createDialogPlayer.teamName}
+              </span>
+              <span>
+                <strong>Position:</strong> {createDialogPlayer.positionLabel || "-"}
+              </span>
             </div>
             <div className="form-stack">
               <label className="muted">Periodtyp</label>

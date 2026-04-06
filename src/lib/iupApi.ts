@@ -1,5 +1,6 @@
 import { supabase } from "./supabaseClient";
 import {
+  fetchMyClubs,
   fetchMyProfile,
   fetchMyAdminTeams,
 } from "./sharedOrgApi";
@@ -7,6 +8,9 @@ import {
 export type TeamLite = {
   id: string;
   name: string;
+  clubId?: string;
+  clubName?: string;
+  label: string;
 };
 
 export type PlanLevel = "FREE" | "AUTH" | "PAID";
@@ -31,6 +35,8 @@ export type PaidPlayer = {
   id: string;
   teamId: string;
   teamName: string;
+  clubId?: string;
+  clubName?: string;
   name: string;
   number: number;
   positionLabel: string;
@@ -51,6 +57,7 @@ export type SquadPlayer = PaidPlayer & {
 
 export type PlayerListFilters = {
   search?: string;
+  clubId?: string;
   teamId?: string;
   positionLabel?: string;
   status?: "all" | "active" | "inactive";
@@ -320,16 +327,28 @@ export const fetchTeams = async (): Promise<{
   ok: false;
   error: string;
 }> => {
-  const result = await fetchMyAdminTeams();
-  if (!result.ok) {
-    return { ok: false, error: result.error };
+  const [teamResult, clubResult] = await Promise.all([fetchMyAdminTeams(), fetchMyClubs()]);
+  if (!teamResult.ok) {
+    return { ok: false, error: teamResult.error };
   }
+  if (!clubResult.ok) {
+    return { ok: false, error: clubResult.error };
+  }
+
+  const clubNameById = new Map(clubResult.data.map((club) => [club.id, club.name] as const));
+
   return {
     ok: true,
-    teams: result.data.map((team) => ({
+    teams: teamResult.data.map((team) => {
+      const clubName = team.clubId ? clubNameById.get(team.clubId) : undefined;
+      return {
       id: team.id,
       name: team.name,
-    })),
+        clubId: team.clubId,
+        clubName,
+        label: clubName ? `${clubName} / ${team.name}` : team.name,
+      };
+    }),
   };
 };
 
@@ -599,7 +618,15 @@ export const fetchPaidPlayers = async (
   }
 
   const teamNameById = new Map(normalizedTeams.map((team) => [team.id, team.name] as const));
-  const baseTeamIds = normalizedTeams.map((team) => team.id);
+  const teamClubById = new Map(normalizedTeams.map((team) => [team.id, team.clubId] as const));
+  const clubNameResult = await fetchMyClubs();
+  if (!clubNameResult.ok) {
+    return { ok: false, error: clubNameResult.error };
+  }
+  const clubNameById = new Map(clubNameResult.data.map((club) => [club.id, club.name] as const));
+  const baseTeamIds = normalizedTeams
+    .filter((team) => !filters.clubId || team.clubId === filters.clubId)
+    .map((team) => team.id);
   const teamIds =
     filters.teamId && baseTeamIds.includes(filters.teamId) ? [filters.teamId] : baseTeamIds;
   if (teamIds.length === 0) {
@@ -661,6 +688,11 @@ export const fetchPaidPlayers = async (
       id: player.id,
       teamId: player.team_id,
       teamName: teamNameById.get(player.team_id) ?? "Team",
+      clubId: teamClubById.get(player.team_id) ?? undefined,
+      clubName: (() => {
+        const clubId = teamClubById.get(player.team_id);
+        return clubId ? clubNameById.get(clubId) : undefined;
+      })(),
       name: player.display_name ?? "Spelare",
       number: player.shirt_number ?? 0,
       positionLabel: player.team_position ?? "",
@@ -706,7 +738,15 @@ export const fetchSquadPlayers = async (
     return { ok: true, players: [] };
   }
 
-  const baseTeamIds = normalizedTeams.map((team) => team.id);
+  const clubResult = await fetchMyClubs();
+  if (!clubResult.ok) {
+    return { ok: false, error: clubResult.error };
+  }
+  const clubNameById = new Map(clubResult.data.map((club) => [club.id, club.name] as const));
+  const teamClubById = new Map(normalizedTeams.map((team) => [team.id, team.clubId] as const));
+  const baseTeamIds = normalizedTeams
+    .filter((team) => !filters.clubId || team.clubId === filters.clubId)
+    .map((team) => team.id);
   const teamIds =
     filters.teamId && baseTeamIds.includes(filters.teamId) ? [filters.teamId] : baseTeamIds;
   if (teamIds.length === 0) {
@@ -776,6 +816,11 @@ export const fetchSquadPlayers = async (
         id: player.id,
         teamId: player.team_id,
         teamName: teamNameById.get(player.team_id) ?? "Team",
+        clubId: teamClubById.get(player.team_id) ?? undefined,
+        clubName: (() => {
+          const clubId = teamClubById.get(player.team_id);
+          return clubId ? clubNameById.get(clubId) : undefined;
+        })(),
         name: player.display_name ?? "Spelare",
         number: player.shirt_number ?? 0,
         positionLabel: player.team_position ?? "",

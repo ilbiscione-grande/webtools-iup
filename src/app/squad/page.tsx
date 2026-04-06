@@ -85,7 +85,9 @@ export default function SquadPage() {
   const [plan, setPlan] = useState<PlanLevel>("FREE");
   const [teams, setTeams] = useState<TeamLite[]>([]);
   const [players, setPlayers] = useState<SquadPlayer[]>([]);
+  const [createClubFilter, setCreateClubFilter] = useState("all");
   const [playerSearch, setPlayerSearch] = useState("");
+  const [clubFilter, setClubFilter] = useState("all");
   const [teamFilter, setTeamFilter] = useState("all");
   const [positionFilter, setPositionFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState<PlayerStatusFilter>("all");
@@ -101,6 +103,28 @@ export default function SquadPage() {
   );
 
   const teamNames = useMemo(() => teams, [teams]);
+  const clubOptions = useMemo(() => {
+    const seen = new Set<string>();
+    return teams.flatMap((team) => {
+      if (!team.clubId || !team.clubName || seen.has(team.clubId)) {
+        return [];
+      }
+      seen.add(team.clubId);
+      return [{ id: team.clubId, name: team.clubName }];
+    });
+  }, [teams]);
+  const visibleTeamOptions = useMemo(
+    () => (clubFilter === "all" ? teams : teams.filter((team) => team.clubId === clubFilter)),
+    [clubFilter, teams]
+  );
+  const createClubOptions = useMemo(() => clubOptions, [clubOptions]);
+  const createVisibleTeamOptions = useMemo(
+    () =>
+      createClubFilter === "all"
+        ? teams
+        : teams.filter((team) => team.clubId === createClubFilter),
+    [createClubFilter, teams]
+  );
 
   const positionNames = useMemo(
     () =>
@@ -113,6 +137,7 @@ export default function SquadPage() {
   const loadPlayers = async (nextIncludeArchived: boolean) => {
     const result = await fetchSquadPlayers(nextIncludeArchived, {
       search: deferredPlayerSearch,
+      clubId: clubFilter !== "all" ? clubFilter : undefined,
       teamId: teamFilter !== "all" ? teamFilter : undefined,
       positionLabel: positionFilter !== "all" ? positionFilter : undefined,
       status: statusFilter,
@@ -190,7 +215,25 @@ export default function SquadPage() {
       return;
     }
     loadPlayers(includeArchived);
-  }, [deferredPlayerSearch, includeArchived, plan, positionFilter, statusFilter, teamFilter]);
+  }, [clubFilter, deferredPlayerSearch, includeArchived, plan, positionFilter, statusFilter, teamFilter]);
+
+  useEffect(() => {
+    if (teamFilter !== "all" && !visibleTeamOptions.some((team) => team.id === teamFilter)) {
+      setTeamFilter("all");
+    }
+  }, [teamFilter, visibleTeamOptions]);
+
+  useEffect(() => {
+    if (
+      createForm.teamId &&
+      !createVisibleTeamOptions.some((team) => team.id === createForm.teamId)
+    ) {
+      setCreateForm((current) => ({
+        ...current,
+        teamId: createVisibleTeamOptions[0]?.id ?? "",
+      }));
+    }
+  }, [createForm.teamId, createVisibleTeamOptions]);
 
   useEffect(() => {
     if (!selectedPlayer) {
@@ -336,15 +379,26 @@ export default function SquadPage() {
             <div className="form-stack">
               <div className="row wrap">
                 <select
+                  value={createClubFilter}
+                  onChange={(event) => setCreateClubFilter(event.target.value)}
+                >
+                  <option value="all">Alla klubbar</option>
+                  {createClubOptions.map((club) => (
+                    <option key={club.id} value={club.id}>
+                      {club.name}
+                    </option>
+                  ))}
+                </select>
+                <select
                   value={createForm.teamId}
                   onChange={(event) =>
                     setCreateForm((current) => ({ ...current, teamId: event.target.value }))
                   }
                 >
                   <option value="">Välj lag</option>
-                  {teams.map((team) => (
+                  {createVisibleTeamOptions.map((team) => (
                     <option key={team.id} value={team.id}>
-                      {team.name}
+                      {team.label}
                     </option>
                   ))}
                 </select>
@@ -407,11 +461,19 @@ export default function SquadPage() {
                 onChange={(event) => setPlayerSearch(event.target.value)}
                 className="input-wide"
               />
+              <select value={clubFilter} onChange={(event) => setClubFilter(event.target.value)}>
+                <option value="all">Alla klubbar</option>
+                {clubOptions.map((club) => (
+                  <option key={club.id} value={club.id}>
+                    {club.name}
+                  </option>
+                ))}
+              </select>
               <select value={teamFilter} onChange={(event) => setTeamFilter(event.target.value)}>
                 <option value="all">Alla lag</option>
-                {teamNames.map((team) => (
+                {visibleTeamOptions.map((team) => (
                   <option key={team.id} value={team.id}>
-                    {team.name}
+                    {team.label}
                   </option>
                 ))}
               </select>
@@ -455,7 +517,7 @@ export default function SquadPage() {
                         {player.name}
                       </div>
                       <div className="muted-sm">
-                        {player.teamName} · {player.positionLabel || "-"} ·{" "}
+                        {player.clubName ? `${player.clubName} / ` : ""}{player.teamName} · {player.positionLabel || "-"} ·{" "}
                         {player.isActive ? "Aktiv" : "Arkiverad"}
                       </div>
                     </button>
@@ -471,7 +533,15 @@ export default function SquadPage() {
                         {selectedPlayer.name} {selectedPlayer.isActive ? "" : "(Arkiverad)"}
                       </h4>
                       <div className="row wrap">
-                        <input value={selectedPlayer.teamName} disabled className="input-medium" />
+                        <input
+                          value={
+                            selectedPlayer.clubName
+                              ? `${selectedPlayer.clubName} / ${selectedPlayer.teamName}`
+                              : selectedPlayer.teamName
+                          }
+                          disabled
+                          className="input-medium"
+                        />
                         <input
                           placeholder="Namn"
                           value={editForm.name}
