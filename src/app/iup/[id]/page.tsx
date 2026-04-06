@@ -1642,13 +1642,6 @@ export default function IupPlanPage() {
 
               <div className="iup-profile-aside">
                 <div className="iup-title-row">
-                  <input
-                    value={title}
-                    onChange={(event) => setTitle(event.target.value)}
-                    disabled={!canEditPlan}
-                    placeholder="IUP title"
-                    className="iup-title-input"
-                  />
                   <select
                     value={selectedReviewPointId}
                     onChange={(event) => onSelectReviewPoint(event.target.value)}
