@@ -666,12 +666,43 @@ button.danger {
   opacity: 0.9;
 }
 
+.goal-suggestion-wrap {
+  display: grid;
+  gap: 4px;
+}
+
 .goal-suggestion {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   font-size: 11px;
   padding: 4px 8px;
   border-radius: 999px;
   border: 1px solid var(--border);
   background: #f7f9ff;
+  color: var(--text-muted);
+}
+
+.goal-suggestion-text {
+  flex: 1 1 auto;
+}
+
+.goal-suggestion-chevron {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  font-size: 14px;
+  line-height: 1;
+  border-radius: 999px;
+  color: inherit;
+}
+
+.goal-suggestion-description {
+  max-width: 320px;
+  padding: 0 10px 2px;
+  font-size: 12px;
+  line-height: 1.4;
   color: var(--text-muted);
 }
 

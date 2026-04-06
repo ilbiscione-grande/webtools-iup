@@ -545,6 +545,8 @@ export default function IupPlanPage() {
     useState<PositionGroup>("all");
   const [shortCustomGoal, setShortCustomGoal] = useState("");
   const [longCustomGoal, setLongCustomGoal] = useState("");
+  const [expandedShortSuggestions, setExpandedShortSuggestions] = useState<string[]>([]);
+  const [expandedLongSuggestions, setExpandedLongSuggestions] = useState<string[]>([]);
   const [isSignedIn, setIsSignedIn] = useState(false);
   const [signedInEmail, setSignedInEmail] = useState("");
   const [signedInUserId, setSignedInUserId] = useState<string | null>(null);
@@ -972,6 +974,14 @@ export default function IupPlanPage() {
         goal.title.trim().toLowerCase() === suggestion.title.trim().toLowerCase() &&
         goal.description.trim().toLowerCase() === suggestion.description.trim().toLowerCase()
     );
+  const toggleExpandedSuggestion = (
+    setter: React.Dispatch<React.SetStateAction<string[]>>,
+    key: string
+  ) => {
+    setter((current) =>
+      current.includes(key) ? current.filter((entry) => entry !== key) : [...current, key]
+    );
+  };
   const addCustomGoal = (
     setter: React.Dispatch<React.SetStateAction<GoalRow[]>>,
     value: string,
@@ -2011,13 +2021,55 @@ export default function IupPlanPage() {
                         <strong className="goal-group-label">{group.category}</strong>
                         <div className="toolbar">
                           {group.suggestions.map((suggestion) => (
-                            <button
-                              key={`short-${group.category}-${suggestion.title}`}
-                              onClick={() => applySuggestion(setShortGoals, suggestion)}
-                              className={`goal-suggestion${isGoalSelected(shortGoals, suggestion) ? " selected" : ""}`}
-                            >
-                              {suggestion.title}
-                            </button>
+                            (() => {
+                              const suggestionKey = `short-${group.category}-${suggestion.title}`;
+                              const isExpanded = expandedShortSuggestions.includes(suggestionKey);
+                              return (
+                                <div
+                                  key={suggestionKey}
+                                  className={`goal-suggestion-wrap${isExpanded ? " expanded" : ""}`}
+                                >
+                                  <button
+                                    type="button"
+                                    onClick={() => applySuggestion(setShortGoals, suggestion)}
+                                    className={`goal-suggestion${isGoalSelected(shortGoals, suggestion) ? " selected" : ""}`}
+                                  >
+                                    <span className="goal-suggestion-text">{suggestion.title}</span>
+                                    <span
+                                      className="goal-suggestion-chevron"
+                                      onClick={(event) => {
+                                        event.preventDefault();
+                                        event.stopPropagation();
+                                        toggleExpandedSuggestion(
+                                          setExpandedShortSuggestions,
+                                          suggestionKey
+                                        );
+                                      }}
+                                      role="button"
+                                      aria-label={isExpanded ? "Dölj förklaring" : "Visa förklaring"}
+                                      tabIndex={0}
+                                      onKeyDown={(event) => {
+                                        if (event.key === "Enter" || event.key === " ") {
+                                          event.preventDefault();
+                                          event.stopPropagation();
+                                          toggleExpandedSuggestion(
+                                            setExpandedShortSuggestions,
+                                            suggestionKey
+                                          );
+                                        }
+                                      }}
+                                    >
+                                      {isExpanded ? "⌄" : "›"}
+                                    </span>
+                                  </button>
+                                  {isExpanded ? (
+                                    <div className="goal-suggestion-description">
+                                      {suggestion.description}
+                                    </div>
+                                  ) : null}
+                                </div>
+                              );
+                            })()
                           ))}
                         </div>
                       </div>
@@ -2105,13 +2157,55 @@ export default function IupPlanPage() {
                         <strong className="goal-group-label">{group.category}</strong>
                         <div className="toolbar">
                           {group.suggestions.map((suggestion) => (
-                            <button
-                              key={`long-${group.category}-${suggestion.title}`}
-                              onClick={() => applySuggestion(setLongGoals, suggestion)}
-                              className={`goal-suggestion${isGoalSelected(longGoals, suggestion) ? " selected" : ""}`}
-                            >
-                              {suggestion.title}
-                            </button>
+                            (() => {
+                              const suggestionKey = `long-${group.category}-${suggestion.title}`;
+                              const isExpanded = expandedLongSuggestions.includes(suggestionKey);
+                              return (
+                                <div
+                                  key={suggestionKey}
+                                  className={`goal-suggestion-wrap${isExpanded ? " expanded" : ""}`}
+                                >
+                                  <button
+                                    type="button"
+                                    onClick={() => applySuggestion(setLongGoals, suggestion)}
+                                    className={`goal-suggestion${isGoalSelected(longGoals, suggestion) ? " selected" : ""}`}
+                                  >
+                                    <span className="goal-suggestion-text">{suggestion.title}</span>
+                                    <span
+                                      className="goal-suggestion-chevron"
+                                      onClick={(event) => {
+                                        event.preventDefault();
+                                        event.stopPropagation();
+                                        toggleExpandedSuggestion(
+                                          setExpandedLongSuggestions,
+                                          suggestionKey
+                                        );
+                                      }}
+                                      role="button"
+                                      aria-label={isExpanded ? "Dölj förklaring" : "Visa förklaring"}
+                                      tabIndex={0}
+                                      onKeyDown={(event) => {
+                                        if (event.key === "Enter" || event.key === " ") {
+                                          event.preventDefault();
+                                          event.stopPropagation();
+                                          toggleExpandedSuggestion(
+                                            setExpandedLongSuggestions,
+                                            suggestionKey
+                                          );
+                                        }
+                                      }}
+                                    >
+                                      {isExpanded ? "⌄" : "›"}
+                                    </span>
+                                  </button>
+                                  {isExpanded ? (
+                                    <div className="goal-suggestion-description">
+                                      {suggestion.description}
+                                    </div>
+                                  ) : null}
+                                </div>
+                              );
+                            })()
                           ))}
                         </div>
                       </div>
