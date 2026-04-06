@@ -316,6 +316,22 @@ button.danger {
   font-weight: 700;
 }
 
+.iup-avatar-wrap {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+
+.iup-avatar-btn {
+  cursor: pointer;
+  padding: 0;
+  appearance: none;
+}
+
+.iup-avatar-help {
+  text-align: center;
+}
+
 .iup-avatar img {
   width: 100%;
   height: 100%;
@@ -332,6 +348,17 @@ button.danger {
 .iup-profile-main {
   display: grid;
   gap: 6px;
+}
+
+.iup-photo-menu {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+
+.iup-photo-link {
+  display: grid;
+  gap: 8px;
 }
 
 .iup-profile-aside {

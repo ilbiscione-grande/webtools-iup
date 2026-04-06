@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   archiveIupPlan,
   deleteIupPlan,
@@ -493,6 +493,20 @@ const getBmi = (heightCm?: number, weightKg?: number) => {
   return bmi.toFixed(1);
 };
 
+const readFileAsDataUrl = (file: File) =>
+  new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") {
+        resolve(reader.result);
+        return;
+      }
+      reject(new Error("Could not read file."));
+    };
+    reader.onerror = () => reject(new Error("Could not read file."));
+    reader.readAsDataURL(file);
+  });
+
 export default function IupPlanPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
@@ -539,6 +553,9 @@ export default function IupPlanPage() {
     injuryNotes?: string;
     photoUrl?: string;
   } | null>(null);
+  const [showPhotoActions, setShowPhotoActions] = useState(false);
+  const [showPhotoLinkInput, setShowPhotoLinkInput] = useState(false);
+  const [photoLinkDraft, setPhotoLinkDraft] = useState("");
   const [shortSuggestionFilter, setShortSuggestionFilter] =
     useState<PositionGroup>("all");
   const [longSuggestionFilter, setLongSuggestionFilter] =
@@ -562,6 +579,8 @@ export default function IupPlanPage() {
     mode: "FREE" | "AUTH";
     userId?: string | null;
   } | null>(null);
+  const filePickerRef = useRef<HTMLInputElement | null>(null);
+  const cameraPickerRef = useRef<HTMLInputElement | null>(null);
 
   const canSave = useMemo(() => !!planId && !saving, [planId, saving]);
   const filteredShortSuggestions = useMemo(
@@ -796,6 +815,7 @@ export default function IupPlanPage() {
             name: localDraft.playerName || "Unnamed player",
             teamName: source?.mode === "AUTH" ? "AUTH local" : "FREE temporary",
           });
+          setPhotoLinkDraft("");
           setShortSuggestionFilter("all");
           setLongSuggestionFilter("all");
           setError(null);
@@ -904,6 +924,7 @@ export default function IupPlanPage() {
             }
           : null
       );
+      setPhotoLinkDraft(player?.photoUrl ?? "");
 
       const positionGroup = inferPositionGroup(player?.positionLabel);
       setShortSuggestionFilter(positionGroup);
@@ -1120,6 +1141,57 @@ export default function IupPlanPage() {
     }
     return "Roll: Läsläge";
   }, [canManagePlan, localDraftSource]);
+
+  const applyPlayerPhotoUrl = (photoUrl?: string) => {
+    const nextUrl = photoUrl?.trim() || undefined;
+    setPlayerInfo((current) =>
+      current
+        ? {
+            ...current,
+            photoUrl: nextUrl,
+          }
+        : current
+    );
+    setPhotoLinkDraft(nextUrl ?? "");
+  };
+
+  const onSelectPhotoFile = async (
+    event: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) {
+      return;
+    }
+    if (!file.type.startsWith("image/")) {
+      setStatus("Välj en bildfil för profilbilden.");
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setStatus("Bildfilen är för stor. Välj en bild under 5 MB.");
+      return;
+    }
+    try {
+      const dataUrl = await readFileAsDataUrl(file);
+      applyPlayerPhotoUrl(dataUrl);
+      setShowPhotoActions(false);
+      setShowPhotoLinkInput(false);
+      setStatus("Profilbild uppdaterad. Spara IUP för att behålla ändringen.");
+    } catch {
+      setStatus("Kunde inte läsa bildfilen.");
+    }
+  };
+
+  const onApplyPhotoLink = () => {
+    applyPlayerPhotoUrl(photoLinkDraft);
+    setShowPhotoActions(false);
+    setShowPhotoLinkInput(false);
+    setStatus(
+      photoLinkDraft.trim()
+        ? "Profilbildslänk uppdaterad. Spara IUP för att behålla ändringen."
+        : "Profilbild borttagen."
+    );
+  };
 
   const onSave = async () => {
     if (!planId) {
@@ -1571,13 +1643,92 @@ export default function IupPlanPage() {
       {!loading && !error ? (
         <section className="card card-strong">
           <div className="card iup-profile">
-            <div className="iup-avatar">
-              {playerInfo?.photoUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={playerInfo.photoUrl} alt={playerInfo.name} />
+            <div className="iup-avatar-wrap">
+              {canEditPlan ? (
+                <button
+                  type="button"
+                  className="iup-avatar iup-avatar-btn"
+                  onClick={() => setShowPhotoActions((current) => !current)}
+                  title="Ändra profilbild"
+                  aria-label="Ändra profilbild"
+                >
+                  {playerInfo?.photoUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={playerInfo.photoUrl} alt={playerInfo.name} />
+                  ) : (
+                    <span>{(playerInfo?.name ?? "P").slice(0, 1).toUpperCase()}</span>
+                  )}
+                </button>
               ) : (
-                <span>{(playerInfo?.name ?? "P").slice(0, 1).toUpperCase()}</span>
+                <div className="iup-avatar">
+                  {playerInfo?.photoUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={playerInfo.photoUrl} alt={playerInfo.name} />
+                  ) : (
+                    <span>{(playerInfo?.name ?? "P").slice(0, 1).toUpperCase()}</span>
+                  )}
+                </div>
               )}
+              {canEditPlan ? (
+                <>
+                  <input
+                    ref={filePickerRef}
+                    type="file"
+                    accept="image/*"
+                    hidden
+                    onChange={onSelectPhotoFile}
+                  />
+                  <input
+                    ref={cameraPickerRef}
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    hidden
+                    onChange={onSelectPhotoFile}
+                  />
+                  <span className="muted-sm iup-avatar-help">Klicka för att byta bild</span>
+                  {showPhotoActions ? (
+                    <div className="card iup-photo-menu">
+                      <button type="button" onClick={() => filePickerRef.current?.click()}>
+                        Välj från enhet
+                      </button>
+                      <button type="button" onClick={() => cameraPickerRef.current?.click()}>
+                        Bilder / fota
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowPhotoLinkInput((current) => !current)}
+                      >
+                        Använd länk
+                      </button>
+                      {playerInfo?.photoUrl ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            applyPlayerPhotoUrl("");
+                            setShowPhotoActions(false);
+                            setShowPhotoLinkInput(false);
+                          }}
+                        >
+                          Ta bort bild
+                        </button>
+                      ) : null}
+                      {showPhotoLinkInput ? (
+                        <div className="iup-photo-link">
+                          <input
+                            value={photoLinkDraft}
+                            onChange={(event) => setPhotoLinkDraft(event.target.value)}
+                            placeholder="https://..."
+                          />
+                          <button type="button" onClick={onApplyPhotoLink}>
+                            Spara länk
+                          </button>
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </>
+              ) : null}
             </div>
             <div className="iup-profile-content">
               <div className="iup-profile-main">
@@ -1641,6 +1792,50 @@ export default function IupPlanPage() {
               </div>
 
               <div className="iup-profile-aside">
+                {canManagePlan ? (
+                  <div className="iup-actions">
+                    {canEditPlan && activeReviewPoint && !activeReviewPoint.completedAt ? (
+                      <button
+                        type="button"
+                        onClick={onCompleteReviewPoint}
+                        disabled={saving}
+                        title="Markera återkoppling klar"
+                        aria-label="Markera återkoppling klar"
+                        className="icon-btn"
+                      >
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+                          <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.5" />
+                          <path d="M7.5 12.5 10.5 15.5 16.5 9.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={onArchive}
+                      disabled={saving || planStatus === "archived"}
+                      title="Arkivera"
+                      aria-label="Arkivera"
+                      className="icon-btn"
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+                        <path d="M4 7h16v3H4V7Zm2 3h12v9a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1v-9Zm4-6h4l1 2H9l1-2Z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+                      </svg>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={onDelete}
+                      disabled={saving}
+                      title="Ta bort"
+                      aria-label="Ta bort"
+                      className="icon-btn"
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+                        <path d="M8 8l8 8M16 8l-8 8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                        <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.4" />
+                      </svg>
+                    </button>
+                  </div>
+                ) : null}
                 <div className="iup-title-row">
                   <select
                     value={selectedReviewPointId}
@@ -1657,76 +1852,32 @@ export default function IupPlanPage() {
                     ))}
                   </select>
                   {canManagePlan ? (
-                    <>
-                      {canEditPlan && activeReviewPoint && !activeReviewPoint.completedAt ? (
-                        <button
-                          type="button"
-                          onClick={onCompleteReviewPoint}
-                          disabled={saving}
-                          title="Markera återkoppling klar"
-                          aria-label="Markera återkoppling klar"
-                          className="icon-btn"
-                        >
-                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
-                            <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.5" />
-                            <path d="M7.5 12.5 10.5 15.5 16.5 9.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-                          </svg>
-                        </button>
-                      ) : null}
-                      <button
-                        type="button"
-                        onClick={onArchive}
-                        disabled={saving || planStatus === "archived"}
-                        title="Arkivera"
-                        aria-label="Arkivera"
-                        className="icon-btn"
-                      >
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
-                          <path d="M4 7h16v3H4V7Zm2 3h12v9a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1v-9Zm4-6h4l1 2H9l1-2Z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
-                        </svg>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={onDelete}
-                        disabled={saving}
-                        title="Ta bort"
-                        aria-label="Ta bort"
-                        className="icon-btn"
-                      >
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
-                          <path d="M8 8l8 8M16 8l-8 8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-                          <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.4" />
-                        </svg>
-                      </button>
-                    </>
+                    null
                   ) : null}
                 </div>
               </div>
             </div>
           </div>
 
-          <div className="iup-header-form">
-            <div className="toolbar">
-              <span className="muted-sm">
-                Aktiv återkoppling: <strong>{activeReviewPoint?.label || "Tillfälle"}</strong>
-                {activeReviewPoint?.dueDate ? ` (${activeReviewPoint.dueDate})` : ""}
-                {activeReviewPoint?.skipped ? " • Hoppad över" : ""}
-                {activeReviewPoint?.completedAt ? " • Klar" : ""}
-              </span>
+          {((canEditPlan && activeReviewPoint?.completedAt && !activeReviewPointEditable) ||
+            !activeReviewPointEditable) ? (
+            <div className="iup-header-form">
               {canEditPlan && activeReviewPoint?.completedAt && !activeReviewPointEditable ? (
-                <button type="button" onClick={onUnlockReviewPoint}>
-                  Lås upp för redigering
-                </button>
+                <div className="toolbar">
+                  <button type="button" onClick={onUnlockReviewPoint}>
+                    Lås upp för redigering
+                  </button>
+                </div>
+              ) : null}
+              {!activeReviewPointEditable ? (
+                <p className="alert-warning">
+                  {activeReviewPoint?.skipped
+                    ? "Denna återkoppling är hoppad över och öppnas i läsläge."
+                    : "Denna återkoppling är klar och öppnas i läsläge tills du låser upp den."}
+                </p>
               ) : null}
             </div>
-            {!activeReviewPointEditable ? (
-              <p className="alert-warning">
-                {activeReviewPoint?.skipped
-                  ? "Denna återkoppling är hoppad över och öppnas i läsläge."
-                  : "Denna återkoppling är klar och öppnas i läsläge tills du låser upp den."}
-              </p>
-            ) : null}
-          </div>
+          ) : null}
 
           <div className="card step-shell">
             <div aria-hidden className="step-track">
@@ -1887,16 +2038,11 @@ export default function IupPlanPage() {
                         }
                         placeholder="Födelseort"
                       />
-                      <input
-                        value={playerInfo?.photoUrl ?? ""}
-                        onChange={(event) =>
-                          setPlayerInfo((current) =>
-                            current ? { ...current, photoUrl: event.target.value } : current
-                          )
-                        }
-                        placeholder="Foto-URL"
-                      />
                     </div>
+                    <p className="iup-note">
+                      Klicka på profilbilden ovan för att välja bild från enhet, bilder/fota
+                      eller lägga in en bildlänk.
+                    </p>
                   </div>
 
                   <div className="card form-stack iup-profile-section">
