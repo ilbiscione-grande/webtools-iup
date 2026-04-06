@@ -1580,138 +1580,142 @@ export default function IupPlanPage() {
               )}
             </div>
             <div className="iup-profile-content">
-              <strong className="iup-player-name">{playerInfo?.name ?? "Spelare"}</strong>
-              <div className="iup-profile-groups">
-                <div className="iup-profile-group">
-                  <span className="iup-profile-group-title">Basdata</span>
-                  <div className="cluster">
-                    <span className="pill">{playerInfo?.teamName ?? "Lag saknas"}</span>
-                    {playerInfo?.positionLabel ? (
-                      <span className="pill">{playerInfo.positionLabel}</span>
-                    ) : null}
-                    {typeof playerInfo?.number === "number" ? (
-                      <span className="pill">#{playerInfo.number}</span>
-                    ) : null}
-                    {playerInfo?.birthDate ? (
-                      <span className="pill">Född: {playerInfo.birthDate}</span>
-                    ) : null}
-                    {playerInfo?.birthDate ? (
-                      <span className="pill">Ålder: {getAge(playerInfo.birthDate)}</span>
-                    ) : null}
+              <div className="iup-profile-main">
+                <strong className="iup-player-name">{playerInfo?.name ?? "Spelare"}</strong>
+                <div className="iup-profile-groups">
+                  <div className="iup-profile-group">
+                    <span className="iup-profile-group-title">Basdata</span>
+                    <div className="cluster">
+                      <span className="pill">{playerInfo?.teamName ?? "Lag saknas"}</span>
+                      {playerInfo?.positionLabel ? (
+                        <span className="pill">{playerInfo.positionLabel}</span>
+                      ) : null}
+                      {typeof playerInfo?.number === "number" ? (
+                        <span className="pill">#{playerInfo.number}</span>
+                      ) : null}
+                      {playerInfo?.birthDate ? (
+                        <span className="pill">Född: {playerInfo.birthDate}</span>
+                      ) : null}
+                      {playerInfo?.birthDate ? (
+                        <span className="pill">Ålder: {getAge(playerInfo.birthDate)}</span>
+                      ) : null}
+                    </div>
+                  </div>
+                  <div className="iup-profile-group">
+                    <span className="iup-profile-group-title">Fysik</span>
+                    <div className="cluster">
+                      {playerInfo?.dominantFoot ? (
+                        <span className="pill">Fot: {playerInfo.dominantFoot}</span>
+                      ) : null}
+                      {playerInfo?.heightCm ? (
+                        <span className="pill">{playerInfo.heightCm} cm</span>
+                      ) : null}
+                      {playerInfo?.weightKg ? (
+                        <span className="pill">{playerInfo.weightKg} kg</span>
+                      ) : null}
+                      {playerInfo?.heightCm && playerInfo?.weightKg ? (
+                        <span className="pill">BMI: {getBmi(playerInfo.heightCm, playerInfo.weightKg)}</span>
+                      ) : null}
+                    </div>
+                  </div>
+                  <div className="iup-profile-group">
+                    <span className="iup-profile-group-title">Bakgrund</span>
+                    <div className="cluster">
+                      {playerInfo?.birthDate ? (
+                        <span className="pill">Födelseår: {getBirthYear(playerInfo.birthDate)}</span>
+                      ) : null}
+                      {playerInfo?.nationality ? (
+                        <span className="pill">Nationalitet: {playerInfo.nationality}</span>
+                      ) : null}
+                      {playerInfo?.birthPlace ? (
+                        <span className="pill">Födelseort: {playerInfo.birthPlace}</span>
+                      ) : null}
+                    </div>
                   </div>
                 </div>
-                <div className="iup-profile-group">
-                  <span className="iup-profile-group-title">Fysik</span>
-                  <div className="cluster">
-                    {playerInfo?.dominantFoot ? (
-                      <span className="pill">Fot: {playerInfo.dominantFoot}</span>
-                    ) : null}
-                    {playerInfo?.heightCm ? (
-                      <span className="pill">{playerInfo.heightCm} cm</span>
-                    ) : null}
-                    {playerInfo?.weightKg ? (
-                      <span className="pill">{playerInfo.weightKg} kg</span>
-                    ) : null}
-                    {playerInfo?.heightCm && playerInfo?.weightKg ? (
-                      <span className="pill">BMI: {getBmi(playerInfo.heightCm, playerInfo.weightKg)}</span>
-                    ) : null}
-                  </div>
-                </div>
-                <div className="iup-profile-group">
-                  <span className="iup-profile-group-title">Bakgrund</span>
-                  <div className="cluster">
-                    {playerInfo?.birthDate ? (
-                      <span className="pill">Födelseår: {getBirthYear(playerInfo.birthDate)}</span>
-                    ) : null}
-                    {playerInfo?.nationality ? (
-                      <span className="pill">Nationalitet: {playerInfo.nationality}</span>
-                    ) : null}
-                    {playerInfo?.birthPlace ? (
-                      <span className="pill">Födelseort: {playerInfo.birthPlace}</span>
-                    ) : null}
-                  </div>
+                {playerInfo?.injuryNotes ? (
+                  <p className="iup-note">
+                    <strong>Skade-/medicinsk notering:</strong> {playerInfo.injuryNotes}
+                  </p>
+                ) : null}
+              </div>
+
+              <div className="iup-profile-aside">
+                <div className="iup-title-row">
+                  <input
+                    value={title}
+                    onChange={(event) => setTitle(event.target.value)}
+                    disabled={!canEditPlan}
+                    placeholder="IUP title"
+                    className="iup-title-input"
+                  />
+                  <select
+                    value={selectedReviewPointId}
+                    onChange={(event) => onSelectReviewPoint(event.target.value)}
+                    className="input-medium"
+                  >
+                    {reviewPoints.map((point, index) => (
+                      <option key={point.id} value={point.id}>
+                        {(point.label || `Tillfälle ${index + 1}`) +
+                          (point.dueDate ? ` • ${point.dueDate}` : "") +
+                          (point.skipped ? " • Hoppad över" : "") +
+                          (point.completedAt ? " • Klar" : "")}
+                      </option>
+                    ))}
+                  </select>
+                  {canManagePlan ? (
+                    <>
+                      {canEditPlan && activeReviewPoint && !activeReviewPoint.completedAt ? (
+                        <button
+                          type="button"
+                          onClick={onCompleteReviewPoint}
+                          disabled={saving}
+                          title="Markera återkoppling klar"
+                          aria-label="Markera återkoppling klar"
+                          className="icon-btn"
+                        >
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+                            <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.5" />
+                            <path d="M7.5 12.5 10.5 15.5 16.5 9.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        </button>
+                      ) : null}
+                      <button
+                        type="button"
+                        onClick={onArchive}
+                        disabled={saving || planStatus === "archived"}
+                        title="Arkivera"
+                        aria-label="Arkivera"
+                        className="icon-btn"
+                      >
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+                          <path d="M4 7h16v3H4V7Zm2 3h12v9a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1v-9Zm4-6h4l1 2H9l1-2Z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+                        </svg>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={onDelete}
+                        disabled={saving}
+                        title="Ta bort"
+                        aria-label="Ta bort"
+                        className="icon-btn"
+                      >
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+                          <path d="M8 8l8 8M16 8l-8 8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                          <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.4" />
+                        </svg>
+                      </button>
+                    </>
+                  ) : null}
                 </div>
               </div>
-              {playerInfo?.injuryNotes ? (
-                <p className="iup-note">
-                  <strong>Skade-/medicinsk notering:</strong> {playerInfo.injuryNotes}
-                </p>
-              ) : null}
             </div>
           </div>
 
           <div className="iup-header-form">
-            <div className="iup-title-row">
-              <input
-                value={title}
-                onChange={(event) => setTitle(event.target.value)}
-                disabled={!canEditPlan}
-                placeholder="IUP title"
-                className="iup-title-input"
-              />
-              <select
-                value={selectedReviewPointId}
-                onChange={(event) => onSelectReviewPoint(event.target.value)}
-                className="input-medium"
-              >
-                {reviewPoints.map((point, index) => (
-                  <option key={point.id} value={point.id}>
-                    {(point.label || `Tillfälle ${index + 1}`) +
-                      (point.dueDate ? ` • ${point.dueDate}` : "") +
-                      (point.skipped ? " • Hoppad över" : "") +
-                      (point.completedAt ? " • Klar" : "")}
-                  </option>
-                ))}
-              </select>
-              {canManagePlan ? (
-                <>
-                  {canEditPlan && activeReviewPoint && !activeReviewPoint.completedAt ? (
-                    <button
-                      type="button"
-                      onClick={onCompleteReviewPoint}
-                      disabled={saving}
-                      title="Markera återkoppling klar"
-                      aria-label="Markera återkoppling klar"
-                      className="icon-btn"
-                    >
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
-                        <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.5" />
-                        <path d="M7.5 12.5 10.5 15.5 16.5 9.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-                      </svg>
-                    </button>
-                  ) : null}
-                  <button
-                    type="button"
-                    onClick={onArchive}
-                    disabled={saving || planStatus === "archived"}
-                    title="Arkivera"
-                    aria-label="Arkivera"
-                    className="icon-btn"
-                  >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
-                      <path d="M4 7h16v3H4V7Zm2 3h12v9a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1v-9Zm4-6h4l1 2H9l1-2Z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
-                    </svg>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={onDelete}
-                    disabled={saving}
-                    title="Ta bort"
-                    aria-label="Ta bort"
-                    className="icon-btn"
-                  >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
-                      <path d="M8 8l8 8M16 8l-8 8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-                      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.4" />
-                    </svg>
-                  </button>
-                </>
-              ) : null}
-            </div>
             <div className="toolbar">
               <span className="muted-sm">
-                Aktiv återkoppling:{" "}
-                <strong>{activeReviewPoint?.label || "Tillfälle"}</strong>
+                Aktiv återkoppling: <strong>{activeReviewPoint?.label || "Tillfälle"}</strong>
                 {activeReviewPoint?.dueDate ? ` (${activeReviewPoint.dueDate})` : ""}
                 {activeReviewPoint?.skipped ? " • Hoppad över" : ""}
                 {activeReviewPoint?.completedAt ? " • Klar" : ""}
@@ -2036,7 +2040,7 @@ export default function IupPlanPage() {
                                   >
                                     <span className="goal-suggestion-text">{suggestion.title}</span>
                                     <span
-                                      className="goal-suggestion-chevron"
+                                      className={`goal-suggestion-chevron${isExpanded ? " expanded" : ""}`}
                                       onClick={(event) => {
                                         event.preventDefault();
                                         event.stopPropagation();
@@ -2059,7 +2063,22 @@ export default function IupPlanPage() {
                                         }
                                       }}
                                     >
-                                      {isExpanded ? "⌄" : "›"}
+                                      <svg
+                                        width="12"
+                                        height="12"
+                                        viewBox="0 0 12 12"
+                                        fill="none"
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        aria-hidden
+                                      >
+                                        <path
+                                          d="M4 2.5 7.5 6 4 9.5"
+                                          stroke="currentColor"
+                                          strokeWidth="1.5"
+                                          strokeLinecap="round"
+                                          strokeLinejoin="round"
+                                        />
+                                      </svg>
                                     </span>
                                   </button>
                                   {isExpanded ? (
@@ -2172,7 +2191,7 @@ export default function IupPlanPage() {
                                   >
                                     <span className="goal-suggestion-text">{suggestion.title}</span>
                                     <span
-                                      className="goal-suggestion-chevron"
+                                      className={`goal-suggestion-chevron${isExpanded ? " expanded" : ""}`}
                                       onClick={(event) => {
                                         event.preventDefault();
                                         event.stopPropagation();
@@ -2195,7 +2214,22 @@ export default function IupPlanPage() {
                                         }
                                       }}
                                     >
-                                      {isExpanded ? "⌄" : "›"}
+                                      <svg
+                                        width="12"
+                                        height="12"
+                                        viewBox="0 0 12 12"
+                                        fill="none"
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        aria-hidden
+                                      >
+                                        <path
+                                          d="M4 2.5 7.5 6 4 9.5"
+                                          stroke="currentColor"
+                                          strokeWidth="1.5"
+                                          strokeLinecap="round"
+                                          strokeLinejoin="round"
+                                        />
+                                      </svg>
                                     </span>
                                   </button>
                                   {isExpanded ? (
