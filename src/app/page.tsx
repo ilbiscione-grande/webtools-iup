@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   createIupPlan,
@@ -8,13 +8,17 @@ import {
   fetchPlayersInReviewPeriod,
   fetchPaidPlayers,
   fetchProfilePlan,
+  fetchTeams,
   getSessionUser,
   signInPassword,
   signOut,
   signUpPassword,
   type PaidPlayer,
   type PlanLevel,
+  type TeamLite,
 } from "../lib/iupApi";
+
+type PlayerStatusFilter = "all" | "active" | "inactive";
 
 type LocalIupDraft = {
   id: string;
@@ -114,7 +118,12 @@ export default function Page() {
   const [freeDrafts, setFreeDrafts] = useState<LocalIupDraft[]>([]);
   const [authDrafts, setAuthDrafts] = useState<LocalIupDraft[]>([]);
 
+  const [teams, setTeams] = useState<TeamLite[]>([]);
   const [players, setPlayers] = useState<PaidPlayer[]>([]);
+  const [playerSearch, setPlayerSearch] = useState("");
+  const [playerTeamFilter, setPlayerTeamFilter] = useState("all");
+  const [playerPositionFilter, setPlayerPositionFilter] = useState("all");
+  const [playerStatusFilter, setPlayerStatusFilter] = useState<PlayerStatusFilter>("all");
   const [playersInReviewNow, setPlayersInReviewNow] = useState<Record<string, boolean>>({});
   const [selectedPlayerId, setSelectedPlayerId] = useState("");
   const [plansLoading, setPlansLoading] = useState(false);
@@ -141,10 +150,21 @@ export default function Page() {
   const isFree = plan === "FREE";
   const isAuth = plan === "AUTH";
   const isPaid = plan === "PAID";
+  const deferredPlayerSearch = useDeferredValue(playerSearch);
 
   const selectedPlayer = useMemo(
     () => players.find((entry) => entry.id === selectedPlayerId) ?? null,
     [players, selectedPlayerId]
+  );
+
+  const playerTeams = useMemo(() => teams, [teams]);
+
+  const playerPositions = useMemo(
+    () =>
+      Array.from(
+        new Set(players.map((player) => player.positionLabel.trim()).filter(Boolean))
+      ).sort((a, b) => a.localeCompare(b, "sv")),
+    [players]
   );
 
   const availableYears = useMemo(() => {
@@ -190,7 +210,12 @@ export default function Page() {
   };
 
   const loadPaidPlayers = async () => {
-    const result = await fetchPaidPlayers();
+    const result = await fetchPaidPlayers({
+      search: deferredPlayerSearch,
+      teamId: playerTeamFilter !== "all" ? playerTeamFilter : undefined,
+      positionLabel: playerPositionFilter !== "all" ? playerPositionFilter : undefined,
+      status: playerStatusFilter,
+    });
     if (!result.ok) {
       setStatus(result.error);
       setPlayers([]);
@@ -210,7 +235,23 @@ export default function Page() {
       return;
     }
     loadPaidPlayers();
-  }, [signedIn, isPaid]);
+  }, [deferredPlayerSearch, isPaid, playerPositionFilter, playerStatusFilter, playerTeamFilter, signedIn]);
+
+  useEffect(() => {
+    if (!signedIn || !isPaid) {
+      return;
+    }
+    const loadTeamOptions = async () => {
+      const result = await fetchTeams();
+      if (!result.ok) {
+        setStatus(result.error);
+        setTeams([]);
+        return;
+      }
+      setTeams(result.teams);
+    };
+    loadTeamOptions();
+  }, [isPaid, signedIn]);
 
   useEffect(() => {
     const loadReviewIndicators = async () => {
@@ -246,6 +287,12 @@ export default function Page() {
     };
     loadPlayerPlans();
   }, [isPaid, selectedPlayerId]);
+
+  useEffect(() => {
+    if (!players.some((entry) => entry.id === selectedPlayerId)) {
+      setSelectedPlayerId(players[0]?.id ?? "");
+    }
+  }, [players, selectedPlayerId]);
 
   useEffect(() => {
     if (!isFree || typeof window === "undefined") {
@@ -597,9 +644,50 @@ export default function Page() {
             Click a player to view details.
           </p>
 
+          <div className="row wrap mb-10">
+            <input
+              placeholder="Sök namn, lag, position, nummer"
+              value={playerSearch}
+              onChange={(event) => setPlayerSearch(event.target.value)}
+              className="input-wide"
+            />
+            <select
+              value={playerTeamFilter}
+              onChange={(event) => setPlayerTeamFilter(event.target.value)}
+            >
+              <option value="all">Alla lag</option>
+              {playerTeams.map((team) => (
+                <option key={team.id} value={team.id}>
+                  {team.name}
+                </option>
+              ))}
+            </select>
+            <select
+              value={playerPositionFilter}
+              onChange={(event) => setPlayerPositionFilter(event.target.value)}
+            >
+              <option value="all">Alla positioner</option>
+              {playerPositions.map((position) => (
+                <option key={position} value={position}>
+                  {position}
+                </option>
+              ))}
+            </select>
+            <select
+              value={playerStatusFilter}
+              onChange={(event) =>
+                setPlayerStatusFilter(event.target.value as PlayerStatusFilter)
+              }
+            >
+              <option value="all">Alla statusar</option>
+              <option value="active">Aktiva</option>
+              <option value="inactive">Inaktiva</option>
+            </select>
+          </div>
+
           {players.length === 0 ? (
             <p className="muted-line">
-              No players found. Manage teams/squad in Tactics Board first.
+              Inga spelare matchar filtret. Kontrollera dina adminlag eller ändra filtren.
             </p>
           ) : (
             <div className="grid-2">

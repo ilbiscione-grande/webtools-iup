@@ -94,6 +94,11 @@ export type TeamWithMembers = {
 
 type Result<T> = { ok: true; data: T } | { ok: false; error: string };
 
+const isActiveMembershipStatus = (value?: string | null) => {
+  const normalized = (value ?? "").trim().toLowerCase();
+  return !normalized || ["active", "accepted", "member"].includes(normalized);
+};
+
 const mapProfile = (row: {
   id: string;
   plan?: string | null;
@@ -407,6 +412,84 @@ export const fetchMyTeams = async (): Promise<Result<Team[]>> => {
   return {
     ok: true,
     data: dedupeById([...memberTeams, ...ownerTeams]).sort((a, b) =>
+      a.name.localeCompare(b.name, "sv")
+    ),
+  };
+};
+
+export const fetchMyAdminTeams = async (): Promise<Result<Team[]>> => {
+  const auth = await requireUser();
+  if (!auth.ok) {
+    return auth;
+  }
+
+  const [teamAdminResult, clubAdminResult, ownerResult] = await Promise.all([
+    supabase!
+      .from("team_members")
+      .select(
+        "team:teams(id,owner_id,club_id,name,slug,team_type,age_group,season_label,status,club_logo,kit_shirt,kit_shirt_secondary,kit_shorts,kit_socks,kit_vest,kit_jersey_type,created_at,updated_at)"
+      )
+      .eq("user_id", auth.user.id)
+      .eq("is_team_admin", true)
+      .eq("is_active", true),
+    supabase!
+      .from("club_members")
+      .select("club_id,status,is_club_admin")
+      .eq("user_id", auth.user.id)
+      .eq("is_club_admin", true),
+    supabase!
+      .from("teams")
+      .select(
+        "id,owner_id,club_id,name,slug,team_type,age_group,season_label,status,club_logo,kit_shirt,kit_shirt_secondary,kit_shorts,kit_socks,kit_vest,kit_jersey_type,created_at,updated_at"
+      )
+      .eq("owner_id", auth.user.id),
+  ]);
+
+  if (teamAdminResult.error) {
+    return { ok: false, error: teamAdminResult.error.message };
+  }
+  if (clubAdminResult.error) {
+    return { ok: false, error: clubAdminResult.error.message };
+  }
+  if (ownerResult.error) {
+    return { ok: false, error: ownerResult.error.message };
+  }
+
+  const teamAdminTeams = ((teamAdminResult.data ?? []) as Array<{ team?: unknown }>).flatMap(
+    (row) =>
+      row.team && typeof row.team === "object"
+        ? [mapTeam(row.team as Parameters<typeof mapTeam>[0])]
+        : []
+  );
+
+  const activeClubIds = ((clubAdminResult.data ?? []) as Array<{
+    club_id?: string | null;
+    status?: string | null;
+  }>)
+    .filter((row) => row.club_id && isActiveMembershipStatus(row.status))
+    .map((row) => String(row.club_id));
+
+  let clubAdminTeams: Team[] = [];
+  if (activeClubIds.length > 0) {
+    const clubTeamsResult = await supabase!
+      .from("teams")
+      .select(
+        "id,owner_id,club_id,name,slug,team_type,age_group,season_label,status,club_logo,kit_shirt,kit_shirt_secondary,kit_shorts,kit_socks,kit_vest,kit_jersey_type,created_at,updated_at"
+      )
+      .in("club_id", activeClubIds);
+
+    if (clubTeamsResult.error) {
+      return { ok: false, error: clubTeamsResult.error.message };
+    }
+
+    clubAdminTeams = ((clubTeamsResult.data ?? []) as Parameters<typeof mapTeam>[0][]).map(mapTeam);
+  }
+
+  const ownerTeams = ((ownerResult.data ?? []) as Parameters<typeof mapTeam>[0][]).map(mapTeam);
+
+  return {
+    ok: true,
+    data: dedupeById([...teamAdminTeams, ...clubAdminTeams, ...ownerTeams]).sort((a, b) =>
       a.name.localeCompare(b.name, "sv")
     ),
   };

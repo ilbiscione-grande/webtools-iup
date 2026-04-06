@@ -1,7 +1,7 @@
 import { supabase } from "./supabaseClient";
 import {
   fetchMyProfile,
-  fetchMyTeams,
+  fetchMyAdminTeams,
 } from "./sharedOrgApi";
 
 export type TeamLite = {
@@ -47,6 +47,13 @@ export type SquadPlayer = PaidPlayer & {
   birthPlace?: string;
   injuryNotes?: string;
   photoUrl?: string;
+};
+
+export type PlayerListFilters = {
+  search?: string;
+  teamId?: string;
+  positionLabel?: string;
+  status?: "all" | "active" | "inactive";
 };
 
 export type SquadPlayerInput = {
@@ -237,6 +244,8 @@ const isPlayerMember = (row: {
   );
 };
 
+const normalizePlayerSearch = (value?: string) => value?.trim().replaceAll(",", " ") ?? "";
+
 export const getSessionUser = async () => {
   if (!supabase) {
     return null;
@@ -311,7 +320,7 @@ export const fetchTeams = async (): Promise<{
   ok: false;
   error: string;
 }> => {
-  const result = await fetchMyTeams();
+  const result = await fetchMyAdminTeams();
   if (!result.ok) {
     return { ok: false, error: result.error };
   }
@@ -570,9 +579,9 @@ export const fetchPlayersInReviewPeriod = async (
   return { ok: true, byPlayerId };
 };
 
-export const fetchPaidPlayers = async (): Promise<
-  { ok: true; players: PaidPlayer[] } | { ok: false; error: string }
-> => {
+export const fetchPaidPlayers = async (
+  filters: PlayerListFilters = {}
+): Promise<{ ok: true; players: PaidPlayer[] } | { ok: false; error: string }> => {
   if (!supabase) {
     return { ok: false, error: "Supabase missing." };
   }
@@ -580,7 +589,7 @@ export const fetchPaidPlayers = async (): Promise<
   if (!user) {
     return { ok: false, error: "Not signed in." };
   }
-  const teamResult = await fetchMyTeams();
+  const teamResult = await fetchMyAdminTeams();
   if (!teamResult.ok) {
     return { ok: false, error: teamResult.error };
   }
@@ -589,9 +598,15 @@ export const fetchPaidPlayers = async (): Promise<
     return { ok: true, players: [] };
   }
 
-  const teamNameById = new Map(normalizedTeams.map((team) => [team.id, team.name]));
-  const teamIds = normalizedTeams.map((team) => team.id);
-  const { data: players, error: playerError } = await supabase
+  const teamNameById = new Map(normalizedTeams.map((team) => [team.id, team.name] as const));
+  const baseTeamIds = normalizedTeams.map((team) => team.id);
+  const teamIds =
+    filters.teamId && baseTeamIds.includes(filters.teamId) ? [filters.teamId] : baseTeamIds;
+  if (teamIds.length === 0) {
+    return { ok: true, players: [] };
+  }
+
+  let query = supabase
     .from("team_members")
     .select(
       "id,team_id,user_id,display_name,shirt_number,team_position,is_active,photo_url,role,team_role,metadata"
@@ -600,6 +615,30 @@ export const fetchPaidPlayers = async (): Promise<
     .order("team_id", { ascending: true })
     .order("sort_order", { ascending: true })
     .order("shirt_number", { ascending: true });
+
+  if (filters.positionLabel?.trim()) {
+    query = query.eq("team_position", filters.positionLabel.trim());
+  }
+  if (filters.status === "active") {
+    query = query.eq("is_active", true);
+  } else if (filters.status === "inactive") {
+    query = query.eq("is_active", false);
+  }
+
+  const searchTerm = normalizePlayerSearch(filters.search).toLowerCase();
+  if (searchTerm) {
+    const orParts = [
+      `display_name.ilike.%${searchTerm}%`,
+      `team_position.ilike.%${searchTerm}%`,
+    ];
+    const parsedNumber = Number(searchTerm);
+    if (Number.isInteger(parsedNumber)) {
+      orParts.push(`shirt_number.eq.${parsedNumber}`);
+    }
+    query = query.or(orParts.join(","));
+  }
+
+  const { data: players, error: playerError } = await query;
   if (playerError) {
     return { ok: false, error: playerError.message };
   }
@@ -619,21 +658,35 @@ export const fetchPaidPlayers = async (): Promise<
   }>)
     .filter(isPlayerMember)
     .map((player) => ({
-    id: player.id,
-    teamId: player.team_id,
-    teamName: teamNameById.get(player.team_id) ?? "Team",
-    name: player.display_name ?? "Spelare",
-    number: player.shirt_number ?? 0,
-    positionLabel: player.team_position ?? "",
-    isActive: Boolean(player.is_active),
-    userId: player.user_id ?? undefined,
-    photoUrl: player.photo_url ?? undefined,
-  }));
+      id: player.id,
+      teamId: player.team_id,
+      teamName: teamNameById.get(player.team_id) ?? "Team",
+      name: player.display_name ?? "Spelare",
+      number: player.shirt_number ?? 0,
+      positionLabel: player.team_position ?? "",
+      isActive: Boolean(player.is_active),
+      userId: player.user_id ?? undefined,
+      photoUrl: player.photo_url ?? undefined,
+    }))
+    .filter((player) => {
+      if (!searchTerm) {
+        return true;
+      }
+      return (
+        player.name.toLowerCase().includes(searchTerm) ||
+        player.teamName.toLowerCase().includes(searchTerm) ||
+        player.positionLabel.toLowerCase().includes(searchTerm) ||
+        String(player.number).includes(searchTerm)
+      );
+    });
 
   return { ok: true, players: normalizedPlayers };
 };
 
-export const fetchSquadPlayers = async (includeArchived = true): Promise<
+export const fetchSquadPlayers = async (
+  includeArchived = true,
+  filters: PlayerListFilters = {}
+): Promise<
   { ok: true; players: SquadPlayer[] } | { ok: false; error: string }
 > => {
   if (!supabase) {
@@ -644,7 +697,7 @@ export const fetchSquadPlayers = async (includeArchived = true): Promise<
     return { ok: false, error: "Not signed in." };
   }
 
-  const teamResult = await fetchMyTeams();
+  const teamResult = await fetchMyAdminTeams();
   if (!teamResult.ok) {
     return { ok: false, error: teamResult.error };
   }
@@ -653,8 +706,13 @@ export const fetchSquadPlayers = async (includeArchived = true): Promise<
     return { ok: true, players: [] };
   }
 
-  const teamIds = normalizedTeams.map((team) => team.id);
-  const teamNameById = new Map(normalizedTeams.map((team) => [team.id, team.name]));
+  const baseTeamIds = normalizedTeams.map((team) => team.id);
+  const teamIds =
+    filters.teamId && baseTeamIds.includes(filters.teamId) ? [filters.teamId] : baseTeamIds;
+  if (teamIds.length === 0) {
+    return { ok: true, players: [] };
+  }
+  const teamNameById = new Map(normalizedTeams.map((team) => [team.id, team.name] as const));
 
   let query = supabase
     .from("team_members")
@@ -669,6 +727,28 @@ export const fetchSquadPlayers = async (includeArchived = true): Promise<
 
   if (!includeArchived) {
     query = query.eq("is_active", true);
+  }
+
+  if (filters.positionLabel?.trim()) {
+    query = query.eq("team_position", filters.positionLabel.trim());
+  }
+  if (filters.status === "active") {
+    query = query.eq("is_active", true);
+  } else if (filters.status === "inactive") {
+    query = query.eq("is_active", false);
+  }
+
+  const searchTerm = normalizePlayerSearch(filters.search).toLowerCase();
+  if (searchTerm) {
+    const orParts = [
+      `display_name.ilike.%${searchTerm}%`,
+      `team_position.ilike.%${searchTerm}%`,
+    ];
+    const parsedNumber = Number(searchTerm);
+    if (Number.isInteger(parsedNumber)) {
+      orParts.push(`shirt_number.eq.${parsedNumber}`);
+    }
+    query = query.or(orParts.join(","));
   }
 
   let { data: players, error: playerError } = await query;
@@ -691,26 +771,38 @@ export const fetchSquadPlayers = async (includeArchived = true): Promise<
   }>)
     .filter(isPlayerMember)
     .map((player) => {
-    const metadata = parseSquadMetadata(player.metadata);
-    return ({
-    id: player.id,
-    teamId: player.team_id,
-    teamName: teamNameById.get(player.team_id) ?? "Team",
-    name: player.display_name ?? "Spelare",
-    number: player.shirt_number ?? 0,
-    positionLabel: player.team_position ?? "",
-    isActive: Boolean(player.is_active),
-    userId: player.user_id ?? undefined,
-    photoUrl: player.photo_url ?? undefined,
-    birthDate: metadata.birthDate,
-    dominantFoot: metadata.dominantFoot,
-    heightCm: metadata.heightCm,
-    weightKg: metadata.weightKg,
-    nationality: metadata.nationality,
-    birthPlace: metadata.birthPlace,
-    injuryNotes: metadata.injuryNotes,
-  });
-  });
+      const metadata = parseSquadMetadata(player.metadata);
+      return {
+        id: player.id,
+        teamId: player.team_id,
+        teamName: teamNameById.get(player.team_id) ?? "Team",
+        name: player.display_name ?? "Spelare",
+        number: player.shirt_number ?? 0,
+        positionLabel: player.team_position ?? "",
+        isActive: Boolean(player.is_active),
+        userId: player.user_id ?? undefined,
+        photoUrl: player.photo_url ?? undefined,
+        birthDate: metadata.birthDate,
+        dominantFoot: metadata.dominantFoot,
+        heightCm: metadata.heightCm,
+        weightKg: metadata.weightKg,
+        nationality: metadata.nationality,
+        birthPlace: metadata.birthPlace,
+        injuryNotes: metadata.injuryNotes,
+      };
+    })
+    .filter((player) => {
+      if (!searchTerm) {
+        return true;
+      }
+      return (
+        player.name.toLowerCase().includes(searchTerm) ||
+        player.teamName.toLowerCase().includes(searchTerm) ||
+        player.positionLabel.toLowerCase().includes(searchTerm) ||
+        String(player.number).includes(searchTerm) ||
+        (player.nationality ?? "").toLowerCase().includes(searchTerm)
+      );
+    });
 
   return { ok: true, players: normalizedPlayers };
 };

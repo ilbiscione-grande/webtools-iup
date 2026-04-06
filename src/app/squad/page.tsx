@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import {
   archiveSquadPlayer,
   createSquadPlayer,
@@ -14,6 +14,8 @@ import {
   type SquadPlayer,
   type TeamLite,
 } from "../../lib/iupApi";
+
+type PlayerStatusFilter = "all" | "active" | "inactive";
 
 type PlayerForm = {
   teamId: string;
@@ -83,18 +85,38 @@ export default function SquadPage() {
   const [plan, setPlan] = useState<PlanLevel>("FREE");
   const [teams, setTeams] = useState<TeamLite[]>([]);
   const [players, setPlayers] = useState<SquadPlayer[]>([]);
+  const [playerSearch, setPlayerSearch] = useState("");
+  const [teamFilter, setTeamFilter] = useState("all");
+  const [positionFilter, setPositionFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState<PlayerStatusFilter>("all");
   const [selectedPlayerId, setSelectedPlayerId] = useState("");
   const [includeArchived, setIncludeArchived] = useState(true);
   const [createForm, setCreateForm] = useState<PlayerForm>(emptyForm);
   const [editForm, setEditForm] = useState<PlayerForm>(emptyForm);
+  const deferredPlayerSearch = useDeferredValue(playerSearch);
 
   const selectedPlayer = useMemo(
     () => players.find((player) => player.id === selectedPlayerId) ?? null,
     [players, selectedPlayerId]
   );
 
+  const teamNames = useMemo(() => teams, [teams]);
+
+  const positionNames = useMemo(
+    () =>
+      Array.from(
+        new Set(players.map((player) => player.positionLabel.trim()).filter(Boolean))
+      ).sort((a, b) => a.localeCompare(b, "sv")),
+    [players]
+  );
+
   const loadPlayers = async (nextIncludeArchived: boolean) => {
-    const result = await fetchSquadPlayers(nextIncludeArchived);
+    const result = await fetchSquadPlayers(nextIncludeArchived, {
+      search: deferredPlayerSearch,
+      teamId: teamFilter !== "all" ? teamFilter : undefined,
+      positionLabel: positionFilter !== "all" ? positionFilter : undefined,
+      status: statusFilter,
+    });
     if (!result.ok) {
       setStatus(result.error);
       setPlayers([]);
@@ -168,7 +190,7 @@ export default function SquadPage() {
       return;
     }
     loadPlayers(includeArchived);
-  }, [includeArchived]);
+  }, [deferredPlayerSearch, includeArchived, plan, positionFilter, statusFilter, teamFilter]);
 
   useEffect(() => {
     if (!selectedPlayer) {
@@ -177,6 +199,12 @@ export default function SquadPage() {
     }
     setEditForm(toForm(selectedPlayer));
   }, [selectedPlayerId, selectedPlayer]);
+
+  useEffect(() => {
+    if (!players.some((player) => player.id === selectedPlayerId)) {
+      setSelectedPlayerId(players[0]?.id ?? "");
+    }
+  }, [players, selectedPlayerId]);
 
   const onCreatePlayer = async () => {
     if (plan !== "PAID") {
@@ -370,6 +398,44 @@ export default function SquadPage() {
                 />
                 Visa arkiverade
               </label>
+            </div>
+
+            <div className="row wrap mb-10">
+              <input
+                placeholder="Sök namn, lag, position, nummer"
+                value={playerSearch}
+                onChange={(event) => setPlayerSearch(event.target.value)}
+                className="input-wide"
+              />
+              <select value={teamFilter} onChange={(event) => setTeamFilter(event.target.value)}>
+                <option value="all">Alla lag</option>
+                {teamNames.map((team) => (
+                  <option key={team.id} value={team.id}>
+                    {team.name}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={positionFilter}
+                onChange={(event) => setPositionFilter(event.target.value)}
+              >
+                <option value="all">Alla positioner</option>
+                {positionNames.map((position) => (
+                  <option key={position} value={position}>
+                    {position}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={statusFilter}
+                onChange={(event) =>
+                  setStatusFilter(event.target.value as PlayerStatusFilter)
+                }
+              >
+                <option value="all">Alla statusar</option>
+                <option value="active">Aktiva</option>
+                <option value="inactive">Arkiverade</option>
+              </select>
             </div>
 
             {players.length === 0 ? (
