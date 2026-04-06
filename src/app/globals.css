@@ -365,6 +365,7 @@ button.danger {
   display: grid;
   gap: 10px;
   align-content: start;
+  justify-items: end;
 }
 
 .iup-profile-groups {
@@ -415,6 +416,7 @@ button.danger {
   flex-wrap: wrap;
   gap: 10px;
   align-items: center;
+  justify-content: flex-end;
 }
 
 .iup-title-input {
@@ -427,6 +429,7 @@ button.danger {
   flex-wrap: wrap;
   gap: 10px;
   align-items: center;
+  justify-content: flex-end;
 }
 
 .icon-btn {
@@ -466,8 +469,8 @@ button.danger {
 
 .step-btn {
   border-radius: 10px;
-  border: 1px solid var(--border);
-  background: #fff;
+  border: 1px solid #c7d6f8;
+  background: #f3f7ff;
   color: var(--text);
   padding: 8px;
   text-align: left;
@@ -476,12 +479,13 @@ button.danger {
 }
 
 .step-btn.done {
-  background: #ecf2ff;
+  background: #dfe9ff;
+  border-color: #b4c8f7;
 }
 
 .step-btn.current {
-  background: #dce8ff;
-  border-color: #a9bee8;
+  background: #c8dbff;
+  border-color: #7fa4f2;
 }
 
 .step-btn.locked {
@@ -497,11 +501,15 @@ button.danger {
   place-items: center;
   font-size: 12px;
   font-weight: 700;
-  background: #c7d6f8;
+  background: #d6e3ff;
   color: #10203f;
 }
 
-.step-btn.done .step-index,
+.step-btn.done .step-index {
+  background: #5c84e8;
+  color: #fff;
+}
+
 .step-btn.current .step-index {
   background: var(--accent);
   color: #fff;
