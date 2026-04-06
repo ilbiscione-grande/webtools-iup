@@ -155,6 +155,20 @@ export type IupPlanEditor = {
   } | null;
 };
 
+export type IupPlayerProfileInput = {
+  name: string;
+  number?: number;
+  positionLabel?: string;
+  birthDate?: string;
+  dominantFoot?: string;
+  heightCm?: number;
+  weightKg?: number;
+  nationality?: string;
+  birthPlace?: string;
+  injuryNotes?: string;
+  photoUrl?: string;
+};
+
 const normalizePlanStatus = (value: string | null | undefined): IupPlanLite["status"] => {
   if (value === "archived") {
     return "archived";
@@ -917,6 +931,46 @@ export const updateSquadPlayer = async (
       metadata: buildSquadMetadata(payload),
     })
     .eq("id", playerId);
+  if (error) {
+    return { ok: false, error: error.message };
+  }
+  return { ok: true };
+};
+
+export const updateIupPlayerProfile = async (
+  playerId: string,
+  payload: IupPlayerProfileInput
+): Promise<{ ok: true } | { ok: false; error: string }> => {
+  if (!supabase) {
+    return { ok: false, error: "Supabase missing." };
+  }
+  const user = await getSessionUser();
+  if (!user) {
+    return { ok: false, error: "Not signed in." };
+  }
+
+  const { error } = await supabase
+    .from("team_members")
+    .update({
+      display_name: payload.name.trim(),
+      team_position: payload.positionLabel?.trim() || null,
+      shirt_number: payload.number ?? null,
+      photo_url: payload.photoUrl?.trim() || null,
+      metadata: buildSquadMetadata({
+        name: payload.name,
+        number: payload.number,
+        positionLabel: payload.positionLabel,
+        birthDate: payload.birthDate,
+        dominantFoot: payload.dominantFoot,
+        heightCm: payload.heightCm,
+        weightKg: payload.weightKg,
+        nationality: payload.nationality,
+        birthPlace: payload.birthPlace,
+        injuryNotes: payload.injuryNotes,
+      }),
+    })
+    .eq("id", playerId);
+
   if (error) {
     return { ok: false, error: error.message };
   }

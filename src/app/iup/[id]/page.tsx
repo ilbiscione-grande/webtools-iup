@@ -3,7 +3,13 @@
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { archiveIupPlan, deleteIupPlan, fetchIupPlanEditor, saveIupPlanEditor } from "../../../lib/iupApi";
+import {
+  archiveIupPlan,
+  deleteIupPlan,
+  fetchIupPlanEditor,
+  saveIupPlanEditor,
+  updateIupPlayerProfile,
+} from "../../../lib/iupApi";
 import { supabase } from "../../../lib/supabaseClient";
 import {
   longGoalSuggestions,
@@ -62,12 +68,14 @@ const normalizeAssessment = (rows?: Partial<AssessmentRow>[]): AssessmentRow[] =
 const defaultAssessment = (): AssessmentRow[] => normalizeAssessment();
 
 const stepLabels = [
+  "Profil",
   "Nu-läge",
   "Kortsiktiga mål (1-3 mån)",
   "Långsiktiga mål (6-12 mån)",
   "Övrigt & återkoppling",
 ] as const;
 const stepDescriptions = [
+  "Fyll i och uppdatera spelarens profiluppgifter innan IUP-arbetet börjar.",
   "Kartlägg spelarens nuläge med självskattning och kort nulägesbild.",
   "Sätt konkreta mål som går att följa upp inom 1-3 månader.",
   "Definiera utvecklingsmål för 6-12 månader och önskat utfall.",
@@ -517,6 +525,7 @@ export default function IupPlanPage() {
   const [reviewPoints, setReviewPoints] = useState<ReviewPoint[]>([]);
   const [selectedReviewPointId, setSelectedReviewPointId] = useState("");
   const [playerInfo, setPlayerInfo] = useState<{
+    id?: string;
     name: string;
     teamName?: string;
     positionLabel?: string;
@@ -877,6 +886,7 @@ export default function IupPlanPage() {
       setPlayerInfo(
         player
           ? {
+              id: player.id,
               name: player.name,
               teamName: player.teamName,
               positionLabel: player.positionLabel,
@@ -988,15 +998,16 @@ export default function IupPlanPage() {
     [localDraftSource, canManagePlan]
   );
   const stepCompletion = useMemo(() => {
-    const step0Complete = nowState.trim().length > 0;
-    const step1Complete = shortGoals.some(
+    const step0Complete = !!playerInfo?.name?.trim();
+    const step1Complete = nowState.trim().length > 0;
+    const step2Complete = shortGoals.some(
       (goal) => goal.title.trim() || goal.description.trim()
     );
-    const step2Complete = longGoals.some(
+    const step3Complete = longGoals.some(
       (goal) => goal.title.trim() || goal.description.trim()
     );
-    return [step0Complete, step1Complete, step2Complete, true] as const;
-  }, [longGoals, nowState, shortGoals]);
+    return [step0Complete, step1Complete, step2Complete, step3Complete, true] as const;
+  }, [longGoals, nowState, playerInfo?.name, shortGoals]);
   const currentStepComplete = useMemo(() => stepCompletion[step], [step, stepCompletion]);
   const stepProgress = useMemo(
     () => ((step + 1) / stepLabels.length) * 100,
@@ -1153,6 +1164,26 @@ export default function IupPlanPage() {
     }
 
     setSaving(true);
+    if (playerInfo?.id) {
+      const profileResult = await updateIupPlayerProfile(playerInfo.id, {
+        name: playerInfo.name,
+        number: playerInfo.number,
+        positionLabel: playerInfo.positionLabel,
+        birthDate: playerInfo.birthDate,
+        dominantFoot: playerInfo.dominantFoot,
+        heightCm: playerInfo.heightCm,
+        weightKg: playerInfo.weightKg,
+        nationality: playerInfo.nationality,
+        birthPlace: playerInfo.birthPlace,
+        injuryNotes: playerInfo.injuryNotes,
+        photoUrl: playerInfo.photoUrl,
+      });
+      if (!profileResult.ok) {
+        setSaving(false);
+        setStatus(profileResult.error);
+        return;
+      }
+    }
     const result = await saveIupPlanEditor({
       planId,
       title,
@@ -1237,12 +1268,32 @@ export default function IupPlanPage() {
     if (!planId || !canEditPlan) {
       return;
     }
-    if (step !== 3) {
+    if (step !== 4) {
       setStatus("Slutför guiden till sista steget innan du markerar den som klar.");
       return;
     }
     persistCurrentReviewAnswers();
     setSaving(true);
+    if (playerInfo?.id) {
+      const profileResult = await updateIupPlayerProfile(playerInfo.id, {
+        name: playerInfo.name,
+        number: playerInfo.number,
+        positionLabel: playerInfo.positionLabel,
+        birthDate: playerInfo.birthDate,
+        dominantFoot: playerInfo.dominantFoot,
+        heightCm: playerInfo.heightCm,
+        weightKg: playerInfo.weightKg,
+        nationality: playerInfo.nationality,
+        birthPlace: playerInfo.birthPlace,
+        injuryNotes: playerInfo.injuryNotes,
+        photoUrl: playerInfo.photoUrl,
+      });
+      if (!profileResult.ok) {
+        setSaving(false);
+        setStatus(profileResult.error);
+        return;
+      }
+    }
     const result = await saveIupPlanEditor({
       planId,
       title,
@@ -1520,41 +1571,56 @@ export default function IupPlanPage() {
             </div>
             <div className="iup-profile-content">
               <strong className="iup-player-name">{playerInfo?.name ?? "Spelare"}</strong>
-              <div className="cluster">
-                <span className="pill">{playerInfo?.teamName ?? "Lag saknas"}</span>
-                {playerInfo?.positionLabel ? (
-                  <span className="pill">{playerInfo.positionLabel}</span>
-                ) : null}
-                {typeof playerInfo?.number === "number" ? (
-                  <span className="pill">#{playerInfo.number}</span>
-                ) : null}
-                {playerInfo?.birthDate ? (
-                  <span className="pill">Född: {playerInfo.birthDate}</span>
-                ) : null}
-                {playerInfo?.birthDate ? (
-                  <span className="pill">Födelseår: {getBirthYear(playerInfo.birthDate)}</span>
-                ) : null}
-                {playerInfo?.birthDate ? (
-                  <span className="pill">Ålder: {getAge(playerInfo.birthDate)}</span>
-                ) : null}
-                {playerInfo?.dominantFoot ? (
-                  <span className="pill">Fot: {playerInfo.dominantFoot}</span>
-                ) : null}
-                {playerInfo?.heightCm ? (
-                  <span className="pill">{playerInfo.heightCm} cm</span>
-                ) : null}
-                {playerInfo?.weightKg ? (
-                  <span className="pill">{playerInfo.weightKg} kg</span>
-                ) : null}
-                {playerInfo?.heightCm && playerInfo?.weightKg ? (
-                  <span className="pill">BMI: {getBmi(playerInfo.heightCm, playerInfo.weightKg)}</span>
-                ) : null}
-                {playerInfo?.nationality ? (
-                  <span className="pill">Nationalitet: {playerInfo.nationality}</span>
-                ) : null}
-                {playerInfo?.birthPlace ? (
-                  <span className="pill">Födelseort: {playerInfo.birthPlace}</span>
-                ) : null}
+              <div className="iup-profile-groups">
+                <div className="iup-profile-group">
+                  <span className="iup-profile-group-title">Basdata</span>
+                  <div className="cluster">
+                    <span className="pill">{playerInfo?.teamName ?? "Lag saknas"}</span>
+                    {playerInfo?.positionLabel ? (
+                      <span className="pill">{playerInfo.positionLabel}</span>
+                    ) : null}
+                    {typeof playerInfo?.number === "number" ? (
+                      <span className="pill">#{playerInfo.number}</span>
+                    ) : null}
+                    {playerInfo?.birthDate ? (
+                      <span className="pill">Född: {playerInfo.birthDate}</span>
+                    ) : null}
+                    {playerInfo?.birthDate ? (
+                      <span className="pill">Ålder: {getAge(playerInfo.birthDate)}</span>
+                    ) : null}
+                  </div>
+                </div>
+                <div className="iup-profile-group">
+                  <span className="iup-profile-group-title">Fysik</span>
+                  <div className="cluster">
+                    {playerInfo?.dominantFoot ? (
+                      <span className="pill">Fot: {playerInfo.dominantFoot}</span>
+                    ) : null}
+                    {playerInfo?.heightCm ? (
+                      <span className="pill">{playerInfo.heightCm} cm</span>
+                    ) : null}
+                    {playerInfo?.weightKg ? (
+                      <span className="pill">{playerInfo.weightKg} kg</span>
+                    ) : null}
+                    {playerInfo?.heightCm && playerInfo?.weightKg ? (
+                      <span className="pill">BMI: {getBmi(playerInfo.heightCm, playerInfo.weightKg)}</span>
+                    ) : null}
+                  </div>
+                </div>
+                <div className="iup-profile-group">
+                  <span className="iup-profile-group-title">Bakgrund</span>
+                  <div className="cluster">
+                    {playerInfo?.birthDate ? (
+                      <span className="pill">Födelseår: {getBirthYear(playerInfo.birthDate)}</span>
+                    ) : null}
+                    {playerInfo?.nationality ? (
+                      <span className="pill">Nationalitet: {playerInfo.nationality}</span>
+                    ) : null}
+                    {playerInfo?.birthPlace ? (
+                      <span className="pill">Födelseort: {playerInfo.birthPlace}</span>
+                    ) : null}
+                  </div>
+                </div>
               </div>
               {playerInfo?.injuryNotes ? (
                 <p className="iup-note">
@@ -1687,10 +1753,163 @@ export default function IupPlanPage() {
           </div>
 
           <fieldset
-            disabled={!canEditPlan || saving || (step !== 3 && !activeReviewPointEditable)}
+            disabled={!canEditPlan || saving || (step !== 4 && step !== 0 && !activeReviewPointEditable)}
             className="step-fieldset"
           >
             {step === 0 ? (
+              <>
+                <h3 className="section-h3">Spelarprofil</h3>
+                <div className="iup-profile-editor">
+                  <div className="card form-stack iup-profile-section">
+                    <strong className="iup-profile-group-title">Basdata</strong>
+                    <div className="row wrap">
+                      <input
+                        value={playerInfo?.name ?? ""}
+                        onChange={(event) =>
+                          setPlayerInfo((current) =>
+                            current ? { ...current, name: event.target.value } : current
+                          )
+                        }
+                        placeholder="Namn"
+                      />
+                      <input
+                        value={typeof playerInfo?.number === "number" ? String(playerInfo.number) : ""}
+                        onChange={(event) =>
+                          setPlayerInfo((current) =>
+                            current
+                              ? {
+                                  ...current,
+                                  number: event.target.value.trim()
+                                    ? Number(event.target.value)
+                                    : undefined,
+                                }
+                              : current
+                          )
+                        }
+                        placeholder="Nummer"
+                        className="input-short"
+                      />
+                      <input
+                        value={playerInfo?.positionLabel ?? ""}
+                        onChange={(event) =>
+                          setPlayerInfo((current) =>
+                            current ? { ...current, positionLabel: event.target.value } : current
+                          )
+                        }
+                        placeholder="Favoritposition"
+                      />
+                      <input
+                        type="date"
+                        value={playerInfo?.birthDate ?? ""}
+                        onChange={(event) =>
+                          setPlayerInfo((current) =>
+                            current ? { ...current, birthDate: event.target.value } : current
+                          )
+                        }
+                      />
+                    </div>
+                  </div>
+
+                  <div className="card form-stack iup-profile-section">
+                    <strong className="iup-profile-group-title">Fysik</strong>
+                    <div className="row wrap">
+                      <input
+                        value={playerInfo?.dominantFoot ?? ""}
+                        onChange={(event) =>
+                          setPlayerInfo((current) =>
+                            current ? { ...current, dominantFoot: event.target.value } : current
+                          )
+                        }
+                        placeholder="Dominant foot"
+                      />
+                      <input
+                        value={typeof playerInfo?.heightCm === "number" ? String(playerInfo.heightCm) : ""}
+                        onChange={(event) =>
+                          setPlayerInfo((current) =>
+                            current
+                              ? {
+                                  ...current,
+                                  heightCm: event.target.value.trim()
+                                    ? Number(event.target.value)
+                                    : undefined,
+                                }
+                              : current
+                          )
+                        }
+                        placeholder="Längd cm"
+                        className="input-short"
+                      />
+                      <input
+                        value={typeof playerInfo?.weightKg === "number" ? String(playerInfo.weightKg) : ""}
+                        onChange={(event) =>
+                          setPlayerInfo((current) =>
+                            current
+                              ? {
+                                  ...current,
+                                  weightKg: event.target.value.trim()
+                                    ? Number(event.target.value)
+                                    : undefined,
+                                }
+                              : current
+                          )
+                        }
+                        placeholder="Vikt kg"
+                        className="input-short"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="card form-stack iup-profile-section">
+                    <strong className="iup-profile-group-title">Bakgrund</strong>
+                    <div className="row wrap">
+                      <input
+                        value={playerInfo?.nationality ?? ""}
+                        onChange={(event) =>
+                          setPlayerInfo((current) =>
+                            current ? { ...current, nationality: event.target.value } : current
+                          )
+                        }
+                        placeholder="Nationalitet"
+                      />
+                      <input
+                        value={playerInfo?.birthPlace ?? ""}
+                        onChange={(event) =>
+                          setPlayerInfo((current) =>
+                            current ? { ...current, birthPlace: event.target.value } : current
+                          )
+                        }
+                        placeholder="Födelseort"
+                      />
+                      <input
+                        value={playerInfo?.photoUrl ?? ""}
+                        onChange={(event) =>
+                          setPlayerInfo((current) =>
+                            current ? { ...current, photoUrl: event.target.value } : current
+                          )
+                        }
+                        placeholder="Foto-URL"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="card form-stack iup-profile-section">
+                    <strong className="iup-profile-group-title">Medicinsk info</strong>
+                    <textarea
+                      value={playerInfo?.injuryNotes ?? ""}
+                      onChange={(event) =>
+                        setPlayerInfo((current) =>
+                          current ? { ...current, injuryNotes: event.target.value } : current
+                        )
+                      }
+                      placeholder="Skade-/medicinsk notering"
+                      className="text-area-md"
+                    />
+                  </div>
+                </div>
+              </>
+            ) : null}
+
+            {step === 1 ? (
               <>
                 <h3 className="section-h3">Nu-läge</h3>
                 <div className="form-stack">
@@ -1766,7 +1985,7 @@ export default function IupPlanPage() {
               </>
             ) : null}
 
-            {step === 1 ? (
+            {step === 2 ? (
               <>
                 <h3 className="section-h3">Kortsiktiga mål (1-3 månader)</h3>
                 <div className="card form-stack">
@@ -1860,7 +2079,7 @@ export default function IupPlanPage() {
               </>
             ) : null}
 
-            {step === 2 ? (
+            {step === 3 ? (
               <>
                 <h3 className="section-h3">Långsiktiga mål (6-12 månader)</h3>
                 <div className="card form-stack">
@@ -1954,7 +2173,7 @@ export default function IupPlanPage() {
               </>
             ) : null}
 
-            {step === 3 ? (
+            {step === 4 ? (
               <>
                 <h3 className="section-h3">Sammanfattning</h3>
                 <div className="card form-stack">
@@ -2060,16 +2279,16 @@ export default function IupPlanPage() {
                   if (error) {
                     return;
                   }
-                  if (step === 3) {
+                  if (step === 4) {
                     onComplete();
                     return;
                   }
-                  setStep((current) => Math.min(3, current + 1));
+                  setStep((current) => Math.min(4, current + 1));
                   setStatus(null);
                 }}
                 disabled={saving || !!error}
               >
-                {step === 3 ? "Klar" : `Nästa${nextStepLabel ? `: ${nextStepLabel}` : ""}`}
+                {step === 4 ? "Klar" : `Nästa${nextStepLabel ? `: ${nextStepLabel}` : ""}`}
               </button>
               <button className="primary" onClick={onSave} disabled={!canSave || !canEditPlan || !!error}>
                 {saving

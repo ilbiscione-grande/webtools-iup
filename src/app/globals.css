@@ -327,6 +327,33 @@ button.danger {
   gap: 6px;
 }
 
+.iup-profile-groups {
+  display: grid;
+  gap: 10px;
+}
+
+.iup-profile-group {
+  display: grid;
+  gap: 6px;
+}
+
+.iup-profile-editor {
+  display: grid;
+  gap: 12px;
+}
+
+.iup-profile-section {
+  gap: 10px;
+}
+
+.iup-profile-group-title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
 .iup-player-name {
   font-size: 20px;
 }
