@@ -2,6 +2,7 @@
 
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useI18n } from "@/lib/i18n";
 import {
   createIupPlan,
   fetchIupPlansForPlayer,
@@ -105,6 +106,7 @@ const reviewCadenceConfig: Record<
 };
 
 export default function Page() {
+  const { messages } = useI18n();
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -336,9 +338,9 @@ export default function Page() {
       setFreeDrafts(Array.isArray(parsed) ? parsed : []);
     } catch {
       setFreeDrafts([]);
-      setStatus("Could not read temporary drafts.");
+      setStatus(messages.home.couldNotReadTemporaryDrafts);
     }
-  }, [isFree]);
+  }, [isFree, messages.home.couldNotReadTemporaryDrafts]);
 
   useEffect(() => {
     if (!isFree || typeof window === "undefined") {
@@ -347,9 +349,9 @@ export default function Page() {
     try {
       window.sessionStorage.setItem(FREE_SESSION_DRAFTS_KEY, JSON.stringify(freeDrafts));
     } catch {
-      setStatus("Could not save temporary drafts.");
+      setStatus(messages.home.couldNotSaveTemporaryDrafts);
     }
-  }, [isFree, freeDrafts]);
+  }, [freeDrafts, isFree, messages.home.couldNotSaveTemporaryDrafts]);
 
   useEffect(() => {
     if (!isAuth || !userId || typeof window === "undefined") {
@@ -366,9 +368,9 @@ export default function Page() {
       setAuthDrafts(Array.isArray(parsed) ? parsed : []);
     } catch {
       setAuthDrafts([]);
-      setStatus("Could not read local drafts.");
+      setStatus(messages.home.couldNotReadLocalDrafts);
     }
-  }, [isAuth, userId]);
+  }, [isAuth, messages.home.couldNotReadLocalDrafts, userId]);
 
   useEffect(() => {
     if (!isAuth || !userId || typeof window === "undefined") {
@@ -380,19 +382,19 @@ export default function Page() {
         JSON.stringify(authDrafts)
       );
     } catch {
-      setStatus("Could not save local drafts.");
+      setStatus(messages.home.couldNotSaveLocalDrafts);
     }
-  }, [isAuth, userId, authDrafts]);
+  }, [authDrafts, isAuth, messages.home.couldNotSaveLocalDrafts, userId]);
 
   const onCreateLocalDraft = () => {
     if (!draft.title.trim()) {
-      setStatus("Fill in IUP title.");
+      setStatus(messages.home.fillIupTitle);
       return;
     }
 
     const next: LocalIupDraft = {
       id: typeof globalThis !== "undefined" && globalThis.crypto && typeof globalThis.crypto.randomUUID === "function" ? globalThis.crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
-      playerName: draft.playerName.trim() || "Unnamed player",
+      playerName: draft.playerName.trim() || messages.home.unnamedPlayer,
       title: draft.title.trim(),
       mainFocus: draft.mainFocus.trim(),
       currentLevel: draft.currentLevel.trim(),
@@ -408,7 +410,7 @@ export default function Page() {
         try {
           window.localStorage.setItem(key, JSON.stringify(nextAuth));
         } catch {
-          setStatus("Could not save local draft.");
+          setStatus(messages.home.couldNotSaveLocalDrafts);
           return;
         }
         window.sessionStorage.setItem(
@@ -417,7 +419,7 @@ export default function Page() {
         );
       }
       setAuthDrafts(nextAuth);
-      setStatus("Local draft saved (AUTH).");
+      setStatus(messages.home.localDraftSavedAuth);
     } else {
       const nextFree = [next, ...freeDrafts];
       if (typeof window !== "undefined") {
@@ -431,12 +433,12 @@ export default function Page() {
             JSON.stringify({ mode: "FREE" })
           );
         } catch {
-          setStatus("Could not save temporary draft.");
+          setStatus(messages.home.couldNotSaveTemporaryDrafts);
           return;
         }
       }
       setFreeDrafts(nextFree);
-      setStatus("Temporary draft saved (FREE, current session only).");
+      setStatus(messages.home.localDraftSavedFree);
     }
 
     setDraft(emptyDraft);
@@ -486,14 +488,14 @@ export default function Page() {
       setStatus(result.error);
       return;
     }
-    setStatus(`Ny IUP skapad för ${createDialogPlayer.name}.`);
+    setStatus(`${messages.home.iupCreatedFor} ${createDialogPlayer.name}.`);
     closeCreateIupDialog();
     router.push(`/iup/${result.planId}`);
   };
 
   const onSignInPassword = async () => {
     if (!email.trim() || !password) {
-      setStatus("Enter email and password.");
+      setStatus(messages.home.enterEmailPassword);
       return;
     }
     setBusy(true);
@@ -503,13 +505,13 @@ export default function Page() {
       setStatus(result.error);
       return;
     }
-    setStatus("Signed in.");
+    setStatus(messages.home.signedInStatus);
     await loadAuthState();
   };
 
   const onSignUpPassword = async () => {
     if (!email.trim() || !password) {
-      setStatus("Enter email and password.");
+      setStatus(messages.home.enterEmailPassword);
       return;
     }
     setBusy(true);
@@ -517,14 +519,14 @@ export default function Page() {
     setBusy(false);
     setStatus(
       result.ok
-        ? "Account created. Confirm email if required, then sign in."
+        ? messages.home.accountCreated
         : result.error
     );
   };
 
   const onSignOut = async () => {
     await signOut();
-    setStatus("Signed out.");
+    setStatus(messages.home.signedOutStatus);
     setAuthDrafts([]);
     setFreeDrafts([]);
     setDraft(emptyDraft);
@@ -537,42 +539,42 @@ export default function Page() {
         <div className="page-title">
           <h1>Teamzone IUP</h1>
           <p className="page-subtitle">
-            Access mode: <strong>{plan}</strong>
+            {messages.home.accessMode}: <strong>{plan}</strong>
           </p>
         </div>
       </section>
 
       {!signedIn ? (
         <section className="card card-strong">
-          <h2 className="title-md">Sign in</h2>
+          <h2 className="title-md">{messages.home.signInTitle}</h2>
           <div className="toolbar">
             <input
               type="email"
-              placeholder="Email"
+              placeholder={messages.home.emailPlaceholder}
               value={email}
               onChange={(event) => setEmail(event.target.value)}
               className="input-wide"
             />
             <input
               type="password"
-              placeholder="Password"
+              placeholder={messages.home.passwordPlaceholder}
               value={password}
               onChange={(event) => setPassword(event.target.value)}
               className="input-medium"
             />
             <button type="button" className="primary" disabled={busy} onClick={onSignInPassword}>
-              Sign in
+              {messages.home.signIn}
             </button>
             <button type="button" disabled={busy} onClick={onSignUpPassword}>
-              Create account
+              {messages.home.createAccount}
             </button>
           </div>
         </section>
       ) : (
         <section className="card">
           <div className="row row-between">
-            <h2 className="title-md">Signed in</h2>
-            <button type="button" onClick={onSignOut}>Sign out</button>
+            <h2 className="title-md">{messages.home.signedIn}</h2>
+            <button type="button" onClick={onSignOut}>{messages.home.signOut}</button>
           </div>
         </section>
       )}
@@ -580,30 +582,30 @@ export default function Page() {
       {!isPaid ? (
         <section className="card">
           <h3 className="section-h3">
-            {isAuth ? "Create new IUP (local)" : "Create new IUP (temporary)"}
+            {isAuth ? messages.home.createLocalTitleAuth : messages.home.createLocalTitleFree}
           </h3>
           <p className="muted">
             {isAuth
-              ? `AUTH mode: no ads, local drafts on this device (${authDrafts.length}).`
-              : `FREE mode: temporary drafts in current session (${freeDrafts.length}).`}
+              ? `${messages.home.authModeInfo} (${authDrafts.length}).`
+              : `${messages.home.freeModeInfo} (${freeDrafts.length}).`}
           </p>
           <div className="content-stack">
             <input
-              placeholder="Player name"
+              placeholder={messages.home.playerNamePlaceholder}
               value={draft.playerName}
               onChange={(event) =>
                 setDraft((current) => ({ ...current, playerName: event.target.value }))
               }
             />
             <input
-              placeholder="IUP title"
+              placeholder={messages.home.iupTitlePlaceholder}
               value={draft.title}
               onChange={(event) =>
                 setDraft((current) => ({ ...current, title: event.target.value }))
               }
             />
             <input
-              placeholder="Main focus"
+              placeholder={messages.home.mainFocusPlaceholder}
               value={draft.mainFocus}
               onChange={(event) =>
                 setDraft((current) => ({ ...current, mainFocus: event.target.value }))
@@ -611,14 +613,14 @@ export default function Page() {
             />
             <div className="row wrap">
               <input
-                placeholder="Current level"
+                placeholder={messages.home.currentLevelPlaceholder}
                 value={draft.currentLevel}
                 onChange={(event) =>
                   setDraft((current) => ({ ...current, currentLevel: event.target.value }))
                 }
               />
               <input
-                placeholder="Target level"
+                placeholder={messages.home.targetLevelPlaceholder}
                 value={draft.targetLevel}
                 onChange={(event) =>
                   setDraft((current) => ({ ...current, targetLevel: event.target.value }))
@@ -626,7 +628,7 @@ export default function Page() {
               />
             </div>
             <textarea
-              placeholder="Notes"
+              placeholder={messages.home.notesPlaceholder}
               value={draft.notes}
               onChange={(event) =>
                 setDraft((current) => ({ ...current, notes: event.target.value }))
@@ -635,20 +637,20 @@ export default function Page() {
             />
             <div className="toolbar">
               <button type="button" className="primary" onClick={onCreateLocalDraft}>
-                Create local draft
+                {messages.home.createLocalDraft}
               </button>
-              <button type="button" onClick={() => setDraft(emptyDraft)}>Clear</button>
+              <button type="button" onClick={() => setDraft(emptyDraft)}>{messages.common.clear}</button>
             </div>
           </div>
 
           {visibleLocalDrafts.length > 0 ? (
             <div className="goal-groups mt-8">
-              <strong>{isAuth ? "Local drafts" : "Temporary drafts"}</strong>
+              <strong>{isAuth ? messages.home.localDrafts : messages.home.temporaryDrafts}</strong>
               {visibleLocalDrafts.map((entry) => (
                 <div key={entry.id} className="card">
                   <strong>{entry.title}</strong>
                   <span className="muted-sm">
-                    {entry.playerName} · Focus: {entry.mainFocus || "-"}
+                    {entry.playerName} · {messages.home.focus}: {entry.mainFocus || "-"}
                   </span>
                   <span className="muted-sm">
                     {new Date(entry.createdAt).toLocaleString()}
@@ -663,13 +665,13 @@ export default function Page() {
       {isPaid ? (
         <section className="card card-strong">
           <div className="row row-between mb-8">
-            <h3 className="section-h3">Your squad players</h3>
+            <h3 className="section-h3">{messages.home.squadTitle}</h3>
             <button type="button" onClick={() => router.push("/squad")}>
-              Hantera squad
+              {messages.home.manageSquad}
             </button>
           </div>
           <p className="page-subtitle">
-            Click a player to view details.
+            {messages.home.clickPlayer}
           </p>
 
           <div className="row wrap mb-10">
@@ -683,7 +685,7 @@ export default function Page() {
               value={playerClubFilter}
               onChange={(event) => setPlayerClubFilter(event.target.value)}
             >
-              <option value="all">Alla klubbar</option>
+              <option value="all">{messages.common.allClubs}</option>
               {playerClubs.map((club) => (
                 <option key={club.id} value={club.id}>
                   {club.name}
@@ -694,7 +696,7 @@ export default function Page() {
               value={playerTeamFilter}
               onChange={(event) => setPlayerTeamFilter(event.target.value)}
             >
-              <option value="all">Alla lag</option>
+              <option value="all">{messages.common.allTeams}</option>
               {visibleTeamOptions.map((team) => (
                 <option key={team.id} value={team.id}>
                   {team.label}
@@ -705,7 +707,7 @@ export default function Page() {
               value={playerPositionFilter}
               onChange={(event) => setPlayerPositionFilter(event.target.value)}
             >
-              <option value="all">Alla positioner</option>
+              <option value="all">{messages.common.allPositions}</option>
               {playerPositions.map((position) => (
                 <option key={position} value={position}>
                   {position}
@@ -718,15 +720,15 @@ export default function Page() {
                 setPlayerStatusFilter(event.target.value as PlayerStatusFilter)
               }
             >
-              <option value="all">Alla statusar</option>
-              <option value="active">Aktiva</option>
-              <option value="inactive">Inaktiva</option>
+              <option value="all">{messages.common.allStatuses}</option>
+              <option value="active">{messages.common.active}</option>
+              <option value="inactive">{messages.common.inactive}</option>
             </select>
           </div>
 
           {players.length === 0 ? (
             <p className="muted-line">
-              Inga spelare matchar filtret. Kontrollera dina adminlag eller ändra filtren.
+              {messages.home.noPlayersForFilter}
             </p>
           ) : (
             <div className="grid-2">
@@ -746,7 +748,7 @@ export default function Page() {
                         {player.name}
                       </strong>
                       {playersInReviewNow[player.id] ? (
-                        <span className="review-now-badge">Återkoppling nu</span>
+                        <span className="review-now-badge">{messages.home.reviewNow}</span>
                       ) : null}
                       <div className="muted-sm">
                         {player.positionLabel || "-"} · {player.clubName ? `${player.clubName} / ` : ""}{player.teamName}
@@ -757,7 +759,7 @@ export default function Page() {
                       onClick={() => openCreateIupDialog(player)}
                       className="primary btn-compact"
                     >
-                      Ny IUP
+                      {messages.home.newIup}
                     </button>
                   </div>
                 ))}
@@ -771,31 +773,31 @@ export default function Page() {
                     </h4>
                     <div className="form-stack">
                       <span>
-                        <strong>Klubb:</strong> {selectedPlayer.clubName || "-"}
+                        <strong>{messages.home.club}:</strong> {selectedPlayer.clubName || "-"}
                       </span>
                       <span>
-                        <strong>Lag:</strong> {selectedPlayer.clubName ? `${selectedPlayer.clubName} / ${selectedPlayer.teamName}` : selectedPlayer.teamName}
+                        <strong>{messages.home.team}:</strong> {selectedPlayer.clubName ? `${selectedPlayer.clubName} / ${selectedPlayer.teamName}` : selectedPlayer.teamName}
                       </span>
                       <span>
-                        <strong>Nummer:</strong> {selectedPlayer.number > 0 ? selectedPlayer.number : "-"}
+                        <strong>{messages.home.number}:</strong> {selectedPlayer.number > 0 ? selectedPlayer.number : "-"}
                       </span>
                       <span>
-                        <strong>Position:</strong> {selectedPlayer.positionLabel || "-"}
+                        <strong>{messages.home.position}:</strong> {selectedPlayer.positionLabel || "-"}
                       </span>
                       <span>
-                        <strong>Status:</strong> {selectedPlayer.isActive ? "Aktiv" : "Inaktiv"}
+                        <strong>{messages.home.status}:</strong> {selectedPlayer.isActive ? messages.common.active : messages.common.inactive}
                       </span>
                     </div>
 
                     <div className="mt-14">
                       <div className="row row-between mb-8">
-                        <h5 className="title-sm">Tidigare IUP</h5>
+                        <h5 className="title-sm">{messages.home.previousIup}</h5>
                         <select
                           value={selectedYear}
                           onChange={(event) => setSelectedYear(event.target.value)}
                           className="select-compact"
                         >
-                          <option value="all">Alla år</option>
+                          <option value="all">{messages.home.allYears}</option>
                           {availableYears.map((year) => (
                             <option key={year} value={year}>
                               {year}
@@ -805,9 +807,9 @@ export default function Page() {
                       </div>
 
                       {plansLoading ? (
-                        <p className="muted-line">Laddar...</p>
+                        <p className="muted-line">{messages.common.loading}</p>
                       ) : visiblePlayerPlans.length === 0 ? (
-                        <p className="muted-line">Inga IUP för valt år.</p>
+                        <p className="muted-line">{messages.home.noIupForYear}</p>
                       ) : (
                         <div className="list-panel list-panel-sm">
                           {visiblePlayerPlans.map((planEntry) => (
@@ -827,7 +829,7 @@ export default function Page() {
                     </div>
                   </>
                 ) : (
-                  <p className="muted-line">Select a player from the list.</p>
+                  <p className="muted-line">{messages.home.selectPlayer}</p>
                 )}
               </div>
             </div>
@@ -836,25 +838,25 @@ export default function Page() {
       ) : null}
 
       {createDialogPlayer ? (
-        <div className="dialog-overlay" role="dialog" aria-modal="true" aria-label="Skapa ny IUP">
+        <div className="dialog-overlay" role="dialog" aria-modal="true" aria-label={messages.home.createDialogTitle}>
           <div className="card card-strong dialog-panel">
             <div className="row row-between">
-              <h3 className="section-h3">Skapa IUP: {createDialogPlayer.name}</h3>
-              <button type="button" onClick={closeCreateIupDialog}>Stäng</button>
+              <h3 className="section-h3">{messages.home.createDialogTitle}: {createDialogPlayer.name}</h3>
+              <button type="button" onClick={closeCreateIupDialog}>{messages.common.close}</button>
             </div>
             <div className="form-stack">
               <span>
-                <strong>Klubb:</strong> {createDialogPlayer.clubName || "-"}
+                <strong>{messages.home.club}:</strong> {createDialogPlayer.clubName || "-"}
               </span>
               <span>
-                <strong>Lag:</strong> {createDialogPlayer.clubName ? `${createDialogPlayer.clubName} / ${createDialogPlayer.teamName}` : createDialogPlayer.teamName}
+                <strong>{messages.home.team}:</strong> {createDialogPlayer.clubName ? `${createDialogPlayer.clubName} / ${createDialogPlayer.teamName}` : createDialogPlayer.teamName}
               </span>
               <span>
-                <strong>Position:</strong> {createDialogPlayer.positionLabel || "-"}
+                <strong>{messages.home.position}:</strong> {createDialogPlayer.positionLabel || "-"}
               </span>
             </div>
             <div className="form-stack">
-              <label className="muted">Periodtyp</label>
+              <label className="muted">{messages.home.periodType}</label>
               <select
                 value={createCycleType}
                 onChange={(event) => {
@@ -874,12 +876,12 @@ export default function Page() {
                   }
                 }}
               >
-                <option value="season">Säsong</option>
-                <option value="year">Kalenderår</option>
+                <option value="season">{messages.home.season}</option>
+                <option value="year">{messages.home.calendarYear}</option>
               </select>
 
               <label className="muted">
-                {createCycleType === "season" ? "Säsong (YYYY/YYYY)" : "År"}
+                {createCycleType === "season" ? messages.home.seasonLabel : messages.home.yearLabel}
               </label>
               <input
                 value={createCycleLabel}
@@ -889,7 +891,7 @@ export default function Page() {
 
               <div className="grid-2">
                 <div className="form-stack">
-                  <label className="muted">Säsongsstart</label>
+                  <label className="muted">{messages.home.seasonStart}</label>
                   <input
                     type="date"
                     value={createPeriodStart}
@@ -897,7 +899,7 @@ export default function Page() {
                   />
                 </div>
                 <div className="form-stack">
-                  <label className="muted">Säsongsslut</label>
+                  <label className="muted">{messages.home.seasonEnd}</label>
                   <input
                     type="date"
                     value={createPeriodEnd}
@@ -906,7 +908,7 @@ export default function Page() {
                 </div>
               </div>
 
-              <label className="muted">Återkopplingar</label>
+              <label className="muted">{messages.home.reviews}</label>
               <select
                 value={createReviewCadence}
                 onChange={(event) =>
@@ -923,23 +925,23 @@ export default function Page() {
                 <option value="weekly">Varje vecka</option>
               </select>
 
-              <label className="muted">Övrigt</label>
+              <label className="muted">{messages.home.other}</label>
               <textarea
                 value={createOtherNotes}
                 onChange={(event) => setCreateOtherNotes(event.target.value)}
-                placeholder="Övrigt kring spelaren, säsongen och IUP:n"
+                placeholder={messages.home.otherNotesPlaceholder}
                 className="text-area-md"
               />
             </div>
             <div className="dialog-actions">
-              <button type="button" onClick={closeCreateIupDialog}>Avbryt</button>
+              <button type="button" onClick={closeCreateIupDialog}>{messages.common.cancel}</button>
               <button
                 type="button"
                 className="primary"
                 onClick={onCreateIupForPlayer}
                 disabled={!createCycleLabel.trim() || !createPeriodStart || !createPeriodEnd}
               >
-                Skapa IUP
+                {messages.home.createIup}
               </button>
             </div>
           </div>

@@ -24,6 +24,14 @@ The latest `iup_schema.sql` is aligned with the shared `profiles`, `clubs`, `clu
 
 Squad/player-specific fields are stored on `team_members`, with extra player profile data mapped through `team_members.metadata`.
 
+Current v1 access model for IUP is admin-scoped:
+
+- team owner
+- active team admin (`team_members.is_team_admin = true`)
+- active club admin for the club that owns the team
+
+Regular team members are not part of the coach/admin IUP workflow in v1.
+
 ## 4. What this starter includes
 
 - Supabase auth (email + password)

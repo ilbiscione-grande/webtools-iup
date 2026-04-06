@@ -1046,6 +1046,7 @@ export const createIupPlan = async (payload: {
   if (!user) {
     return { ok: false as const, error: "Not signed in." };
   }
+  const safeReviewCount = Math.min(52, Math.max(1, payload.reviewCount ?? 3));
   const { data, error } = await supabase
     .from("iup_plans")
     .insert({
@@ -1058,7 +1059,7 @@ export const createIupPlan = async (payload: {
       other_notes: payload.otherNotes ?? "",
       cycle_type: payload.cycleType ?? "season",
       cycle_label: payload.cycleLabel ?? "",
-      review_count: Math.max(1, payload.reviewCount ?? 3),
+      review_count: safeReviewCount,
       review_points: payload.reviewPoints ?? [],
       created_by: user.id,
     })
@@ -1292,6 +1293,7 @@ export const saveIupPlanEditor = async (payload: {
   if (!supabase) {
     return { ok: false, error: "Supabase missing." };
   }
+  const safeReviewCount = Math.min(52, Math.max(1, payload.reviewCount || 3));
   const { error } = await supabase.rpc("save_iup_plan_editor", {
     p_plan_id: payload.planId,
     p_title: payload.title,
@@ -1299,7 +1301,7 @@ export const saveIupPlanEditor = async (payload: {
     p_period_end: payload.periodEnd || null,
     p_now_state: payload.nowState,
     p_other_notes: payload.otherNotes,
-    p_review_count: Math.max(1, payload.reviewCount || 3),
+    p_review_count: safeReviewCount,
     p_cycle_type: payload.cycleType,
     p_cycle_label: payload.cycleLabel,
     p_status: payload.status,

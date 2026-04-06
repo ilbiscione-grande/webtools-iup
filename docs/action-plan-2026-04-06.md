@@ -6,6 +6,59 @@ Datum: 2026-04-06
 
 Stabilisera nuvarande produkt innan mer funktionalitet byggs, så att flödet från inloggning till spelare till IUP fungerar konsekvent i kod, databas och build.
 
+## Arbetschecklista
+
+Använd den här listan som löpande avprickning under arbetet.
+
+### Kritiska blockerare
+
+- [x] Synka `review_count` mellan UI och databas.
+- [ ] Få `npm run ci` att gå grönt i ren miljö.
+- [x] Bestäm och dokumentera faktisk åtkomstmodell.
+
+### Teknisk risk
+
+- [ ] Dela upp [page.tsx](c:/Dev/projects/webtools/iup/src/app/iup/[id]/page.tsx) i mindre ansvar.
+- [ ] Välj en enda strategi för målförslag för `FREE`, `AUTH`, `PAID`.
+
+### Kvalitetsgrund
+
+- [ ] Lägg till linting i projektet och i `ci`.
+- [ ] Lägg till minimala automatiserade smoke-tester.
+- [ ] Skärp [README.md](c:/Dev/projects/webtools/iup/README.md) till driftbar dokumentation.
+
+### Produktifiering
+
+- [ ] Definiera produktbeteende för `FREE`, `AUTH`, `PAID`.
+- [ ] Bygg riktiga rollflöden för coach och spelare.
+- [ ] Aktivera check-ins som faktisk UI-funktion.
+- [ ] Aktivera spelarkonto-koppling via `team_members.user_id`.
+
+## Sprintchecklista
+
+### Sprint 1
+
+- [x] Fixa `review_count`-mismatchen.
+- [ ] Få `npm run ci` grönt.
+- [x] Besluta åtkomstmodell.
+
+### Sprint 2
+
+- [ ] Bryt upp IUP-editorn.
+- [ ] Koppla målförslag till Supabase för inloggade användare.
+
+### Sprint 3
+
+- [ ] Lägg till linting.
+- [ ] Lägg till smoke-test.
+- [ ] Skärp README.
+
+### Sprint 4
+
+- [ ] Definiera planer och roller.
+- [ ] Bygg check-ins i UI.
+- [ ] Börja använda `team_members.user_id` och rollstyrning fullt ut.
+
 ## Principer
 
 - Fixa faktiska blockerare före nya features.
@@ -59,6 +112,13 @@ Leverabler:
 
 Prioritet: Kritisk
 
+Status 2026-04-06:
+
+- `typecheck` passerar
+- `ci` använder nu separat build-katalog för att undvika låst `.next`
+- build fallerar fortfarande lokalt på Windows med `EPERM` i Next-builden
+- kräver fortsatt åtgärd i buildmiljö/rutin innan punkten kan bockas av
+
 ### 3. Bestäm faktisk åtkomstmodell
 
 Problem:
@@ -78,6 +138,15 @@ Leverabler:
 - uppdaterad README/statusdokumentation
 
 Prioritet: Hög
+
+Beslut 2026-04-06:
+
+- v1 använder admin-scope, inte allmän teammedlemsåtkomst
+- åtkomst till IUP i coachflödet gäller endast:
+  - lagägare
+  - aktiv team-admin
+  - aktiv klubb-admin för lagets klubb
+- vanlig lagmedlem/spelare ingår inte i detta flöde ännu
 
 ## Fas 2: Minska teknisk risk
 

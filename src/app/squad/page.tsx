@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { useI18n } from "@/lib/i18n";
 import {
   archiveSquadPlayer,
   createSquadPlayer,
@@ -79,6 +80,7 @@ const getAge = (birthDate?: string) => {
 };
 
 export default function SquadPage() {
+  const { messages } = useI18n();
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
@@ -254,11 +256,11 @@ export default function SquadPage() {
       return;
     }
     if (!createForm.teamId) {
-      setStatus("Välj lag.");
+      setStatus(messages.squad.chooseTeam);
       return;
     }
     if (!createForm.name.trim()) {
-      setStatus("Namn krävs.");
+      setStatus(messages.squad.nameRequired);
       return;
     }
     setBusy(true);
@@ -280,7 +282,7 @@ export default function SquadPage() {
       setStatus(result.error);
       return;
     }
-    setStatus("Spelare skapad.");
+    setStatus(messages.squad.playerCreated);
     setCreateForm((current) => ({ ...emptyForm, teamId: current.teamId }));
     await loadPlayers(includeArchived);
     setSelectedPlayerId(result.playerId);
@@ -291,7 +293,7 @@ export default function SquadPage() {
       return;
     }
     if (!editForm.name.trim()) {
-      setStatus("Namn krävs.");
+      setStatus(messages.squad.nameRequired);
       return;
     }
     setBusy(true);
@@ -312,7 +314,7 @@ export default function SquadPage() {
       setStatus(result.error);
       return;
     }
-    setStatus("Spelare uppdaterad.");
+    setStatus(messages.squad.playerUpdated);
     await loadPlayers(includeArchived);
   };
 
@@ -320,7 +322,7 @@ export default function SquadPage() {
     if (!selectedPlayer) {
       return;
     }
-    const ok = window.confirm("Arkivera spelaren?");
+    const ok = window.confirm(messages.squad.confirmArchive);
     if (!ok) {
       return;
     }
@@ -331,7 +333,7 @@ export default function SquadPage() {
       setStatus(result.error);
       return;
     }
-    setStatus("Spelare arkiverad.");
+    setStatus(messages.squad.playerArchived);
     await loadPlayers(includeArchived);
   };
 
@@ -346,7 +348,7 @@ export default function SquadPage() {
       setStatus(result.error);
       return;
     }
-    setStatus("Spelare återaktiverad.");
+    setStatus(messages.squad.playerRestored);
     await loadPlayers(includeArchived);
   };
 
@@ -354,20 +356,20 @@ export default function SquadPage() {
     <main className="app-shell">
       <section className="page-hero">
         <div className="page-title">
-          <h1>Squad-hantering</h1>
-          <p className="page-subtitle">Redigera spelarprofiler och tillgänglighet.</p>
+          <h1>{messages.squad.title}</h1>
+          <p className="page-subtitle">{messages.squad.subtitle}</p>
         </div>
         <div className="toolbar">
-          <Link href="/">← Tillbaka</Link>
+          <Link href="/">← {messages.common.back}</Link>
         </div>
       </section>
 
-      {loading ? <p>Laddar...</p> : null}
+      {loading ? <p>{messages.common.loading}</p> : null}
 
       {!loading && plan !== "PAID" ? (
         <section className="card">
           <p className="muted-line">
-            Squad-hantering kräver PAID-plan.
+            {messages.squad.paidRequired}
           </p>
         </section>
       ) : null}
@@ -375,14 +377,14 @@ export default function SquadPage() {
       {!loading && plan === "PAID" ? (
         <>
           <section className="card card-strong">
-            <h3 className="section-h3">Ny spelare</h3>
+            <h3 className="section-h3">{messages.squad.newPlayer}</h3>
             <div className="form-stack">
               <div className="row wrap">
                 <select
                   value={createClubFilter}
                   onChange={(event) => setCreateClubFilter(event.target.value)}
                 >
-                  <option value="all">Alla klubbar</option>
+                  <option value="all">{messages.common.allClubs}</option>
                   {createClubOptions.map((club) => (
                     <option key={club.id} value={club.id}>
                       {club.name}
@@ -395,7 +397,7 @@ export default function SquadPage() {
                     setCreateForm((current) => ({ ...current, teamId: event.target.value }))
                   }
                 >
-                  <option value="">Välj lag</option>
+                  <option value="">{messages.squad.selectTeam}</option>
                   {createVisibleTeamOptions.map((team) => (
                     <option key={team.id} value={team.id}>
                       {team.label}
@@ -403,14 +405,14 @@ export default function SquadPage() {
                   ))}
                 </select>
                 <input
-                  placeholder="Namn"
+                  placeholder={messages.squad.name}
                   value={createForm.name}
                   onChange={(event) =>
                     setCreateForm((current) => ({ ...current, name: event.target.value }))
                   }
                 />
                 <input
-                  placeholder="Nummer"
+                  placeholder={messages.home.number}
                   value={createForm.number}
                   onChange={(event) =>
                     setCreateForm((current) => ({ ...current, number: event.target.value }))
@@ -418,7 +420,7 @@ export default function SquadPage() {
                   className="input-short"
                 />
                 <input
-                  placeholder="Position"
+                  placeholder={messages.home.position}
                   value={createForm.positionLabel}
                   onChange={(event) =>
                     setCreateForm((current) => ({
@@ -436,33 +438,33 @@ export default function SquadPage() {
                 />
               </div>
               <button type="button" className="primary" onClick={onCreatePlayer} disabled={busy}>
-                Lägg till spelare
+                {messages.squad.addPlayer}
               </button>
             </div>
           </section>
 
           <section className="card card-strong">
             <div className="row row-between mb-10">
-              <h3 className="section-h3">Spelarlista</h3>
+              <h3 className="section-h3">{messages.squad.playerList}</h3>
               <label className="row gap-8">
                 <input
                   type="checkbox"
                   checked={includeArchived}
                   onChange={(event) => setIncludeArchived(event.target.checked)}
                 />
-                Visa arkiverade
+                {messages.squad.showArchived}
               </label>
             </div>
 
             <div className="row wrap mb-10">
               <input
-                placeholder="Sök namn, lag, position, nummer"
+                placeholder={messages.common.searchPlaceholder}
                 value={playerSearch}
                 onChange={(event) => setPlayerSearch(event.target.value)}
                 className="input-wide"
               />
               <select value={clubFilter} onChange={(event) => setClubFilter(event.target.value)}>
-                <option value="all">Alla klubbar</option>
+                <option value="all">{messages.common.allClubs}</option>
                 {clubOptions.map((club) => (
                   <option key={club.id} value={club.id}>
                     {club.name}
@@ -470,7 +472,7 @@ export default function SquadPage() {
                 ))}
               </select>
               <select value={teamFilter} onChange={(event) => setTeamFilter(event.target.value)}>
-                <option value="all">Alla lag</option>
+                <option value="all">{messages.common.allTeams}</option>
                 {visibleTeamOptions.map((team) => (
                   <option key={team.id} value={team.id}>
                     {team.label}
@@ -481,7 +483,7 @@ export default function SquadPage() {
                 value={positionFilter}
                 onChange={(event) => setPositionFilter(event.target.value)}
               >
-                <option value="all">Alla positioner</option>
+                <option value="all">{messages.common.allPositions}</option>
                 {positionNames.map((position) => (
                   <option key={position} value={position}>
                     {position}
@@ -494,14 +496,14 @@ export default function SquadPage() {
                   setStatusFilter(event.target.value as PlayerStatusFilter)
                 }
               >
-                <option value="all">Alla statusar</option>
-                <option value="active">Aktiva</option>
-                <option value="inactive">Arkiverade</option>
+                <option value="all">{messages.common.allStatuses}</option>
+                <option value="active">{messages.common.active}</option>
+                <option value="inactive">{messages.common.archived}</option>
               </select>
             </div>
 
             {players.length === 0 ? (
-              <p className="muted-line">Inga spelare hittades.</p>
+              <p className="muted-line">{messages.squad.noPlayersFound}</p>
             ) : (
               <div className="grid-2">
                 <div className="list-panel list-panel-lg">
@@ -518,7 +520,7 @@ export default function SquadPage() {
                       </div>
                       <div className="muted-sm">
                         {player.clubName ? `${player.clubName} / ` : ""}{player.teamName} · {player.positionLabel || "-"} ·{" "}
-                        {player.isActive ? "Aktiv" : "Arkiverad"}
+                        {player.isActive ? messages.common.active : messages.common.archived}
                       </div>
                     </button>
                   ))}
@@ -526,7 +528,7 @@ export default function SquadPage() {
 
                 <div className="card">
                   {!selectedPlayer ? (
-                    <p className="muted-line">Välj en spelare i listan.</p>
+                    <p className="muted-line">{messages.common.selectPlayerFromList}</p>
                   ) : (
                     <div className="content-stack">
                       <h4 className="section-h3">
@@ -543,14 +545,14 @@ export default function SquadPage() {
                           className="input-medium"
                         />
                         <input
-                          placeholder="Namn"
+                          placeholder={messages.squad.name}
                           value={editForm.name}
                           onChange={(event) =>
                             setEditForm((current) => ({ ...current, name: event.target.value }))
                           }
                         />
                         <input
-                          placeholder="Nummer"
+                          placeholder={messages.home.number}
                           value={editForm.number}
                           onChange={(event) =>
                             setEditForm((current) => ({ ...current, number: event.target.value }))
@@ -558,7 +560,7 @@ export default function SquadPage() {
                           className="input-short"
                         />
                         <input
-                          placeholder="Position"
+                          placeholder={messages.home.position}
                           value={editForm.positionLabel}
                           onChange={(event) =>
                             setEditForm((current) => ({
@@ -582,11 +584,11 @@ export default function SquadPage() {
                         <input
                           value={getAge(editForm.birthDate)}
                           disabled
-                          placeholder="Ålder"
+                          placeholder={messages.squad.age}
                           className="input-short"
                         />
                         <input
-                          placeholder="Dominant foot"
+                          placeholder={messages.squad.dominantFoot}
                           value={editForm.dominantFoot}
                           onChange={(event) =>
                             setEditForm((current) => ({
@@ -596,7 +598,7 @@ export default function SquadPage() {
                           }
                         />
                         <input
-                          placeholder="Längd cm"
+                          placeholder={messages.squad.heightCm}
                           value={editForm.heightCm}
                           onChange={(event) =>
                             setEditForm((current) => ({
@@ -607,7 +609,7 @@ export default function SquadPage() {
                           className="input-short"
                         />
                         <input
-                          placeholder="Vikt kg"
+                          placeholder={messages.squad.weightKg}
                           value={editForm.weightKg}
                           onChange={(event) =>
                             setEditForm((current) => ({
@@ -620,7 +622,7 @@ export default function SquadPage() {
                       </div>
                       <div className="row wrap">
                         <input
-                          placeholder="Nationalitet"
+                          placeholder={messages.squad.nationality}
                           value={editForm.nationality}
                           onChange={(event) =>
                             setEditForm((current) => ({
@@ -630,7 +632,7 @@ export default function SquadPage() {
                           }
                         />
                         <input
-                          placeholder="Födelseort"
+                          placeholder={messages.squad.birthPlace}
                           value={editForm.birthPlace}
                           onChange={(event) =>
                             setEditForm((current) => ({
@@ -648,20 +650,20 @@ export default function SquadPage() {
                             injuryNotes: event.target.value,
                           }))
                         }
-                        placeholder="Skade-/medicinsk notering"
+                        placeholder={messages.squad.injuryNotes}
                         className="text-area-md"
                       />
                       <div className="row">
                         <button type="button" className="primary" onClick={onSavePlayer} disabled={busy}>
-                          Spara spelare
+                          {messages.squad.savePlayer}
                         </button>
                         {selectedPlayer.isActive ? (
                           <button type="button" onClick={onArchivePlayer} disabled={busy}>
-                            Arkivera
+                            {messages.squad.archive}
                           </button>
                         ) : (
                           <button type="button" onClick={onRestorePlayer} disabled={busy}>
-                            Återaktivera
+                            {messages.squad.restore}
                           </button>
                         )}
                       </div>

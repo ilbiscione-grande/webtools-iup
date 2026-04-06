@@ -6,8 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "clean": "node scripts/clean-next.mjs",
     "typecheck": "tsc --noEmit",
-    "ci": "npm run typecheck && npm run build"
+    "ci": "npm run typecheck && node scripts/build-ci.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.90.1",

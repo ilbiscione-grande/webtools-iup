@@ -2,8 +2,11 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { useI18n } from "@/lib/i18n";
+import { supportedLanguages, type Language } from "@/lib/translations";
 
 export default function SettingsPage() {
+  const { language, setLanguage, messages } = useI18n();
   const [showCoachAssessment, setShowCoachAssessment] = useState(false);
 
   useEffect(() => {
@@ -16,17 +19,37 @@ export default function SettingsPage() {
     window.localStorage.setItem("iup:showCoachAssessment", checked ? "1" : "0");
   };
 
+  const languageLabels: Record<Language, string> = {
+    sv: messages.common.swedish,
+    en: messages.common.english,
+  };
+
   return (
     <main>
       <div style={{ marginBottom: 12, display: "flex", gap: 12, alignItems: "center" }}>
-        <Link href="/">← Back</Link>
-        <strong>Settings</strong>
+        <Link href="/">← {messages.common.back}</Link>
+        <strong>{messages.settings.pageTitle}</strong>
       </div>
 
       <section className="card" style={{ display: "grid", gap: 12 }}>
-        <h2 style={{ margin: 0 }}>IUP Settings</h2>
+        <h2 style={{ margin: 0 }}>{messages.settings.sectionTitle}</h2>
+        <label style={{ display: "grid", gap: 8 }}>
+          <span style={{ fontWeight: 600 }}>{messages.settings.languageTitle}</span>
+          <select
+            value={language}
+            onChange={(event) => setLanguage(event.target.value as Language)}
+            style={{ maxWidth: 240 }}
+          >
+            {supportedLanguages.map((option) => (
+              <option key={option} value={option}>
+                {languageLabels[option]}
+              </option>
+            ))}
+          </select>
+        </label>
+        <p style={{ margin: 0, opacity: 0.8 }}>{messages.settings.languageHelp}</p>
         <label className="row" style={{ justifyContent: "space-between" }}>
-          <span>Visa coach-skattning i IUP</span>
+          <span>{messages.settings.coachAssessmentLabel}</span>
           <input
             type="checkbox"
             checked={showCoachAssessment}
@@ -34,10 +57,7 @@ export default function SettingsPage() {
             style={{ width: 18, height: 18 }}
           />
         </label>
-        <p style={{ margin: 0, opacity: 0.8 }}>
-          Coach-skattningen visas som en extra dropdown bredvid varje självskattning.
-          Endast inloggade användare ser fältet när denna är aktiverad.
-        </p>
+        <p style={{ margin: 0, opacity: 0.8 }}>{messages.settings.coachAssessmentHelp}</p>
       </section>
     </main>
   );

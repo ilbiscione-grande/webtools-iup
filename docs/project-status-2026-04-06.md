@@ -83,26 +83,26 @@ Rekommendation:
 - överväg att rensa `.next` före build i CI om problemet återkommer
 - verifiera build i en ren miljö
 
-### 3. Ägarskap och åtkomstmodell är inte konsekvent implementerad
+### 3. Åtkomstmodell fastslagen för v1
 
-Supabase-schemat stödjer åtkomst via både lagägare och `team_members` genom `can_access_team(...)`.
+IUP-flödet för coach/admin är nu definierat som admin-scope.
 
-Frontend/API-lagret hämtar däremot flera centrala listor enbart via `owner_id = user.id`, bland annat:
+Det gäller:
 
-- `fetchTeams`
-- `fetchPaidPlayers`
-- `fetchSquadPlayers`
+- lagägare
+- aktiv team-admin via `team_members.is_team_admin = true`
+- aktiv klubb-admin för lagets klubb
+
+Det gäller inte ännu:
+
+- vanliga teammedlemmar utan adminroll
+- spelare som bara är kopplade som medlem/användare
 
 Konsekvens:
 
-- en användare som är medlem i ett lag kan enligt RLS få åtkomst till IUP-data
-- men appens listvyer och arbetsflöden kan ändå sakna datat
-- produktbeteendet blir oförutsägbart för andra än ägare
-
-Rekommendation:
-
-- bestäm om endast lagägare ska stödjas i första versionen
-- eller justera klientfrågor så att de följer samma accessmodell som databasen
+- frontend och databas pekar nu åt samma håll
+- coachflödet blir förutsägbart
+- spelaregenåtkomst och bred medlemsåtkomst skjuts till senare produktfas
 
 ## Viktiga kvalitetsbrister
 

@@ -24,6 +24,39 @@ $$;
 
 grant execute on function public.can_access_team(uuid) to authenticated;
 
+create or replace function public.can_admin_team(target_team_id uuid)
+returns boolean
+language sql
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from teams t
+    where t.id = target_team_id
+      and t.owner_id = auth.uid()
+  )
+  or exists (
+    select 1
+    from team_members tm
+    where tm.team_id = target_team_id
+      and tm.user_id = auth.uid()
+      and tm.is_team_admin = true
+      and tm.is_active = true
+  )
+  or exists (
+    select 1
+    from teams t
+    join club_members cm on cm.club_id = t.club_id
+    where t.id = target_team_id
+      and cm.user_id = auth.uid()
+      and cm.is_club_admin = true
+      and coalesce(cm.status, '') in ('active', 'approved')
+  );
+$$;
+
+grant execute on function public.can_admin_team(uuid) to authenticated;
+
 create or replace function public.save_iup_plan_editor(
   p_plan_id uuid,
   p_title text,
@@ -154,7 +187,7 @@ create table if not exists iup_plans (
   constraint iup_plans_status_check
     check (status in ('active', 'completed', 'archived')),
   constraint iup_plans_review_count_check
-    check (review_count >= 1 and review_count <= 12),
+    check (review_count >= 1 and review_count <= 52),
   constraint iup_plans_cycle_type_check
     check (cycle_type in ('year', 'season'))
 );
@@ -191,9 +224,13 @@ alter table if exists iup_plans add column if not exists review_points jsonb not
 alter table if exists iup_plans add column if not exists self_assessment jsonb not null default '[]'::jsonb;
 update iup_plans set status = 'active' where status = 'draft';
 alter table if exists iup_plans drop constraint if exists iup_plans_status_check;
+alter table if exists iup_plans drop constraint if exists iup_plans_review_count_check;
 alter table if exists iup_plans
   add constraint iup_plans_status_check
   check (status in ('active', 'completed', 'archived'));
+alter table if exists iup_plans
+  add constraint iup_plans_review_count_check
+  check (review_count >= 1 and review_count <= 52);
 do $$
 declare
   v_player_fk text;
@@ -266,18 +303,18 @@ drop policy if exists "Users can delete team IUP plans" on iup_plans;
 create policy "Users can view team IUP plans"
 on iup_plans
 for select
-using (public.can_access_team(team_id));
+using (public.can_admin_team(team_id));
 
 create policy "Users can insert team IUP plans"
 on iup_plans
 for insert
-with check (public.can_access_team(team_id) and created_by = auth.uid());
+with check (public.can_admin_team(team_id) and created_by = auth.uid());
 
 create policy "Users can update team IUP plans"
 on iup_plans
 for update
 using (created_by = auth.uid())
-with check (created_by = auth.uid() and public.can_access_team(team_id));
+with check (created_by = auth.uid() and public.can_admin_team(team_id));
 
 create policy "Users can delete team IUP plans"
 on iup_plans
@@ -297,7 +334,7 @@ using (
     select 1
     from iup_plans p
     where p.id = iup_goals.plan_id
-      and public.can_access_team(p.team_id)
+      and public.can_admin_team(p.team_id)
   )
 );
 
@@ -357,7 +394,7 @@ using (
     select 1
     from iup_plans p
     where p.id = iup_checkins.plan_id
-      and public.can_access_team(p.team_id)
+      and public.can_admin_team(p.team_id)
   )
 );
 
@@ -370,7 +407,7 @@ with check (
     select 1
     from iup_plans p
     where p.id = iup_checkins.plan_id
-      and public.can_access_team(p.team_id)
+      and public.can_admin_team(p.team_id)
   )
 );
 
