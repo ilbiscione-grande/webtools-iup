@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useI18n } from "@/lib/i18n";
 import {
   archiveIupPlan,
   deleteIupPlan,
@@ -66,21 +67,6 @@ const normalizeAssessment = (rows?: Partial<AssessmentRow>[]): AssessmentRow[] =
   });
 
 const defaultAssessment = (): AssessmentRow[] => normalizeAssessment();
-
-const stepLabels = [
-  "Profil",
-  "Nu-läge",
-  "Kortsiktiga mål (1-3 mån)",
-  "Långsiktiga mål (6-12 mån)",
-  "Övrigt & återkoppling",
-] as const;
-const stepDescriptions = [
-  "Fyll i och uppdatera spelarens profiluppgifter innan IUP-arbetet börjar.",
-  "Kartlägg spelarens nuläge med självskattning och kort nulägesbild.",
-  "Sätt konkreta mål som går att följa upp inom 1-3 månader.",
-  "Definiera utvecklingsmål för 6-12 månader och önskat utfall.",
-  "Planera period, återkopplingspunkter och kompletterande anteckningar.",
-] as const;
 
 const AUTH_LOCAL_DRAFTS_KEY_PREFIX = "iup:auth:local-drafts:";
 const FREE_SESSION_DRAFTS_KEY = "iup:free:session-drafts";
@@ -202,13 +188,14 @@ const suggestedReviewPeriod = (
   return `${formatIsoDate(rangeStart)} - ${formatIsoDate(rangeEnd)}`;
 };
 
-const defaultReviewLabel = (index: number) => `Tillfälle ${index + 1}`;
+const defaultReviewLabel = (index: number, prefix = "Tillfälle") => `${prefix} ${index + 1}`;
 
 const buildReviewPoints = (
   count: number,
   periodStart?: string,
   periodEnd?: string,
-  current?: ReviewPoint[]
+  current?: ReviewPoint[],
+  labelPrefix?: string
 ): ReviewPoint[] => {
   const safeCount = Math.max(1, count || 3);
   const points: ReviewPoint[] = [];
@@ -218,7 +205,7 @@ const buildReviewPoints = (
     const dueDate = existing?.dueDate ?? "";
     points.push({
       id: existing?.id ?? `rp-${i + 1}`,
-      label: existing?.label ?? defaultReviewLabel(i),
+      label: existing?.label ?? defaultReviewLabel(i, labelPrefix),
       dueDate,
       note: existing?.note ?? "",
       nowState: existing?.nowState ?? "",
@@ -457,6 +444,32 @@ const prioritizeCategoryGroup = (
   return [match, ...groups.filter((entry) => entry.category !== preferred)];
 };
 
+const getSuggestionCategoryLabel = (
+  category: SuggestionCategory,
+  messages: ReturnType<typeof useI18n>["messages"]
+) => {
+  switch (category) {
+    case "Teknik":
+      return messages.iup.categoryTechnique;
+    case "Taktik":
+      return messages.iup.categoryTactics;
+    case "Anfall":
+      return messages.iup.categoryAttack;
+    case "Försvar":
+      return messages.iup.categoryDefense;
+    case "Målvakt":
+      return messages.iup.categoryGoalkeeper;
+    case "Fysik":
+      return messages.iup.categoryPhysical;
+    case "Mentalt":
+      return messages.iup.categoryMental;
+    case "Återhämtning":
+      return messages.iup.categoryRecovery;
+    default:
+      return messages.iup.categoryOther;
+  }
+};
+
 const getBirthYear = (birthDate?: string) => {
   if (!birthDate) {
     return "";
@@ -508,9 +521,24 @@ const readFileAsDataUrl = (file: File) =>
   });
 
 export default function IupPlanPage() {
+  const { messages } = useI18n();
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const planId = params?.id ?? "";
+  const stepLabels = [
+    messages.iup.playerProfile,
+    messages.iup.currentState,
+    messages.iup.shortGoals,
+    messages.iup.longGoals,
+    messages.iup.other,
+  ] as const;
+  const stepDescriptions = [
+    messages.iup.photoHint,
+    messages.iup.stepDescriptionCurrentState,
+    messages.iup.stepDescriptionShortGoals,
+    messages.iup.stepDescriptionLongGoals,
+    messages.iup.stepDescriptionSummary,
+  ] as const;
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -709,7 +737,7 @@ export default function IupPlanPage() {
   useEffect(() => {
     const load = async () => {
       if (!planId) {
-        setError("Missing IUP id.");
+        setError(messages.iup.missingId);
         setLoading(false);
         return;
       }
@@ -770,7 +798,7 @@ export default function IupPlanPage() {
 
           setLocalDraftSource(source);
           setPlanCreatedBy(null);
-          setTitle(localDraft.title || "IUP Local Draft");
+          setTitle(localDraft.title || messages.iup.localDraftTitleFallback);
           setPlanStatus("active");
           setPeriodStart(defaults.periodStart);
           setPeriodEnd(defaults.periodEnd);
@@ -782,13 +810,17 @@ export default function IupPlanPage() {
           setLongGoalsComment(decodedDraftNotes.longGoalsComment);
           const baseAssessment = defaultAssessment();
           setReviewCount(3);
-          const draftPoints = buildReviewPoints(3, defaults.periodStart, defaults.periodEnd).map(
-            (point, idx) => ({
-              ...point,
-              nowState: idx === 0 ? localDraft.currentLevel || "" : "",
-              selfAssessment: baseAssessment.map((entry) => ({ ...entry })),
-            })
-          );
+          const draftPoints = buildReviewPoints(
+            3,
+            defaults.periodStart,
+            defaults.periodEnd,
+            undefined,
+            messages.iup.sessionPrefix
+          ).map((point, idx) => ({
+            ...point,
+            nowState: idx === 0 ? localDraft.currentLevel || "" : "",
+            selfAssessment: baseAssessment.map((entry) => ({ ...entry })),
+          }));
           setReviewPoints(draftPoints);
           setSelectedReviewPointId(draftPoints[0]?.id ?? "");
           setNowState(draftPoints[0]?.nowState ?? "");
@@ -812,14 +844,17 @@ export default function IupPlanPage() {
               : []
           );
           setPlayerInfo({
-            name: localDraft.playerName || "Unnamed player",
-            teamName: source?.mode === "AUTH" ? "AUTH local" : "FREE temporary",
+            name: localDraft.playerName || messages.iup.unnamedPlayer,
+            teamName:
+              source?.mode === "AUTH"
+                ? messages.iup.authLocalTeam
+                : messages.iup.freeTemporaryTeam,
           });
           setPhotoLinkDraft("");
           setShortSuggestionFilter("all");
           setLongSuggestionFilter("all");
           setError(null);
-          setStatus("Local draft mode. Saved on this device.");
+          setStatus(messages.iup.localDraftModeSavedDevice);
           return;
         } catch {
           setError(result.error);
@@ -875,7 +910,8 @@ export default function IupPlanPage() {
                     ? Math.min(5, Math.max(1, entry.coachScore))
                     : undefined,
               })) ?? undefined,
-          }))
+          })),
+          messages.iup.sessionPrefix
         );
       const normalizedReviewPoints = loadedReviewPoints.map((point, idx) => ({
         ...point,
@@ -934,7 +970,15 @@ export default function IupPlanPage() {
       setStatus(null);
     };
     load();
-  }, [planId]);
+  }, [
+    messages.iup.authLocalTeam,
+    messages.iup.freeTemporaryTeam,
+    messages.iup.localDraftModeSavedDevice,
+    messages.iup.localDraftTitleFallback,
+    messages.iup.missingId,
+    messages.iup.unnamedPlayer,
+    planId,
+  ]);
 
   useEffect(() => {
     if (!selectedReviewPointId) {
@@ -1054,43 +1098,54 @@ export default function IupPlanPage() {
     const hasSummer = labels.includes("sommar");
     const hasFall = labels.includes("höst");
     if (hasSpring && hasFall && labels.length === 2) {
-      return "Vår, Höst";
+      return messages.iup.cadenceSpringFall;
     }
     if (hasSpring && hasSummer && hasFall && labels.length === 3) {
-      return "Vår, Sommar, Höst";
+      return messages.iup.cadenceSpringSummerFall;
     }
     if (
       labels.length === 4 &&
       labels.every((label) => label.startsWith("q") || label.startsWith("kvartal"))
     ) {
-      return "Kvartalsvis";
+      return messages.iup.cadenceQuarterly;
     }
     if (labels.length === 6 && labels.every((label) => label.startsWith("varannan månad"))) {
-      return "Varannan månad";
+      return messages.iup.cadenceBiMonthly;
     }
     if (labels.length === 12 && labels.every((label) => label.startsWith("månad"))) {
-      return "Varje månad";
+      return messages.iup.cadenceMonthly;
     }
     if (labels.length === 26 && labels.every((label) => label.startsWith("varannan vecka"))) {
-      return "Varannan vecka";
+      return messages.iup.cadenceBiWeekly;
     }
     if (labels.length === 52 && labels.every((label) => label.startsWith("vecka"))) {
-      return "Varje vecka";
+      return messages.iup.cadenceWeekly;
     }
     if (reviewCount === 6) {
-      return "Varannan månad";
+      return messages.iup.cadenceBiMonthly;
     }
     if (reviewCount === 12) {
-      return "Varje månad";
+      return messages.iup.cadenceMonthly;
     }
     if (reviewCount === 26) {
-      return "Varannan vecka";
+      return messages.iup.cadenceBiWeekly;
     }
     if (reviewCount === 52) {
-      return "Varje vecka";
+      return messages.iup.cadenceWeekly;
     }
-    return `${reviewCount} tillfällen`;
-  }, [reviewCount, reviewPoints]);
+    return `${reviewCount} ${messages.iup.sessionCountSuffix}`;
+  }, [
+    messages.iup.cadenceBiMonthly,
+    messages.iup.cadenceBiWeekly,
+    messages.iup.cadenceMonthly,
+    messages.iup.cadenceQuarterly,
+    messages.iup.cadenceSpringFall,
+    messages.iup.cadenceSpringSummerFall,
+    messages.iup.cadenceWeekly,
+    messages.iup.sessionCountSuffix,
+    reviewCount,
+    reviewPoints,
+  ]);
   const reviewCadenceKind = useMemo<ReviewCadenceKind>(() => {
     const labels = reviewPoints.map((point) => point.label.trim().toLowerCase());
     const hasSpring = labels.includes("vår");
@@ -1131,16 +1186,16 @@ export default function IupPlanPage() {
   }, [reviewCount, reviewPoints]);
   const roleLabel = useMemo(() => {
     if (localDraftSource?.mode === "AUTH") {
-      return "Roll: AUTH lokal redigering";
+      return messages.iup.roleAuthLocal;
     }
     if (localDraftSource?.mode === "FREE") {
-      return "Roll: FREE tillfällig redigering";
+      return messages.iup.roleFreeTemp;
     }
     if (canManagePlan) {
-      return "Roll: Planägare (redigering)";
+      return messages.iup.roleOwner;
     }
-    return "Roll: Läsläge";
-  }, [canManagePlan, localDraftSource]);
+    return messages.iup.roleReadOnly;
+  }, [canManagePlan, localDraftSource, messages.iup.roleAuthLocal, messages.iup.roleFreeTemp, messages.iup.roleOwner, messages.iup.roleReadOnly]);
 
   const applyPlayerPhotoUrl = (photoUrl?: string) => {
     const nextUrl = photoUrl?.trim() || undefined;
@@ -1164,11 +1219,11 @@ export default function IupPlanPage() {
       return;
     }
     if (!file.type.startsWith("image/")) {
-      setStatus("Välj en bildfil för profilbilden.");
+      setStatus(messages.iup.selectImageFile);
       return;
     }
     if (file.size > 5 * 1024 * 1024) {
-      setStatus("Bildfilen är för stor. Välj en bild under 5 MB.");
+      setStatus(messages.iup.imageTooLarge);
       return;
     }
     try {
@@ -1176,9 +1231,9 @@ export default function IupPlanPage() {
       applyPlayerPhotoUrl(dataUrl);
       setShowPhotoActions(false);
       setShowPhotoLinkInput(false);
-      setStatus("Profilbild uppdaterad. Spara IUP för att behålla ändringen.");
+      setStatus(messages.iup.profilePhotoUpdated);
     } catch {
-      setStatus("Kunde inte läsa bildfilen.");
+      setStatus(messages.iup.couldNotReadImage);
     }
   };
 
@@ -1188,8 +1243,8 @@ export default function IupPlanPage() {
     setShowPhotoLinkInput(false);
     setStatus(
       photoLinkDraft.trim()
-        ? "Profilbildslänk uppdaterad. Spara IUP för att behålla ändringen."
-        : "Profilbild borttagen."
+        ? messages.iup.profilePhotoLinkUpdated
+        : messages.iup.profilePhotoRemoved
     );
   };
 
@@ -1198,7 +1253,7 @@ export default function IupPlanPage() {
       return;
     }
     if (!canEditPlan) {
-      setStatus("Du har inte behörighet att spara denna IUP.");
+      setStatus(messages.iup.noPermissionSave);
       return;
     }
     persistCurrentReviewAnswers();
@@ -1208,8 +1263,8 @@ export default function IupPlanPage() {
       try {
         const updated = {
           id: planId,
-          playerName: playerInfo?.name?.trim() || "Unnamed player",
-          title: title.trim() || "IUP Local Draft",
+          playerName: playerInfo?.name?.trim() || messages.iup.unnamedPlayer,
+          title: title.trim() || messages.iup.localDraftTitleFallback,
           mainFocus:
             shortGoals.find((goal) => goal.title.trim())?.title.trim() || "",
           currentLevel: nowState.trim(),
@@ -1236,9 +1291,9 @@ export default function IupPlanPage() {
           window.sessionStorage.setItem(FREE_SESSION_DRAFTS_KEY, JSON.stringify(next));
         }
 
-        setStatus("Local draft saved.");
+        setStatus(messages.iup.localDraftSaved);
       } catch {
-        setStatus("Could not save local draft.");
+        setStatus(messages.iup.couldNotSaveLocalDraft);
       } finally {
         setSaving(false);
       }
@@ -1342,7 +1397,7 @@ export default function IupPlanPage() {
       setCustomShortSuggestions(nextCustomShort);
       setCustomLongSuggestions(nextCustomLong);
     }
-    setStatus("IUP sparad.");
+    setStatus(messages.iup.saved);
     setPlanStatus("active");
   };
 
@@ -1351,7 +1406,7 @@ export default function IupPlanPage() {
       return;
     }
     if (step !== 4) {
-      setStatus("Slutför guiden till sista steget innan du markerar den som klar.");
+      setStatus(messages.iup.finishGuideBeforeComplete);
       return;
     }
     persistCurrentReviewAnswers();
@@ -1421,13 +1476,13 @@ export default function IupPlanPage() {
       return;
     }
     setPlanStatus("completed");
-    setStatus("IUP markerad som klar.");
+    setStatus(messages.iup.markedComplete);
   };
   const onArchive = async () => {
     if (!planId || !canManagePlan) {
       return;
     }
-    const ok = window.confirm("Arkivera denna IUP? Den visas då som arkiverad.");
+    const ok = window.confirm(messages.iup.archiveConfirm);
     if (!ok) {
       return;
     }
@@ -1439,16 +1494,14 @@ export default function IupPlanPage() {
       return;
     }
     setPlanStatus("archived");
-    setStatus("IUP arkiverad.");
+    setStatus(messages.iup.archived);
   };
 
   const onDelete = async () => {
     if (!planId || !canManagePlan) {
       return;
     }
-    const ok = window.confirm(
-      "Ta bort denna IUP permanent? Detta kan inte ångras."
-    );
+    const ok = window.confirm(messages.iup.deleteConfirm);
     if (!ok) {
       return;
     }
@@ -1517,14 +1570,12 @@ export default function IupPlanPage() {
       );
       setStatus(
         suggested
-          ? `Återkopplingen markerad som klar. Nästa föreslagna period: ${suggested}.`
-          : "Återkopplingen markerad som klar."
+          ? `${messages.iup.reviewMarkedDoneWithSuggestion} ${suggested}.`
+          : messages.iup.reviewMarkedDone
       );
       return;
     }
-    setStatus(
-      "Sista återkopplingen markerad som klar. Lås upp den för att redigera igen."
-    );
+    setStatus(messages.iup.lastReviewDone);
   };
   const onUnlockReviewPoint = () => {
     if (!canEditPlan || !activeReviewPoint) {
@@ -1535,7 +1586,7 @@ export default function IupPlanPage() {
         point.id === activeReviewPoint.id ? { ...point, unlockedForEdit: true } : point
       )
     );
-    setStatus("Återkopplingen är upplåst för redigering.");
+    setStatus(messages.iup.reviewUnlocked);
   };
   const onToggleSkipReviewPoint = (pointId: string) => {
     if (!canEditPlan) {
@@ -1598,16 +1649,16 @@ export default function IupPlanPage() {
         <Link
           href="/"
           className="iup-top-icon"
-          title="Back"
-          aria-label="Back"
+          title={messages.common.back}
+          aria-label={messages.common.back}
         >
           ←
         </Link>
         <Link
           href="/settings"
           className="iup-top-icon"
-          title="Settings"
-          aria-label="Settings"
+          title={messages.settings.pageTitle}
+          aria-label={messages.settings.pageTitle}
         >
           <svg
             width="16"
@@ -1632,11 +1683,11 @@ export default function IupPlanPage() {
         </Link>
       </div>
 
-      {loading ? <p>Laddar IUP...</p> : null}
+      {loading ? <p>{messages.iup.loading}</p> : null}
       {error ? <p className="alert-error">{error}</p> : null}
       {!loading && !error && !canEditPlan ? (
         <p className="alert-warning">
-          Du har läsbehörighet till denna IUP. Endast planägaren kan redigera.
+          {messages.iup.readOnlyAccess}
         </p>
       ) : null}
 
@@ -1649,8 +1700,8 @@ export default function IupPlanPage() {
                   type="button"
                   className="iup-avatar iup-avatar-btn"
                   onClick={() => setShowPhotoActions((current) => !current)}
-                  title="Ändra profilbild"
-                  aria-label="Ändra profilbild"
+                  title={messages.iup.changeProfilePhoto}
+                  aria-label={messages.iup.changeProfilePhoto}
                 >
                   {playerInfo?.photoUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element
@@ -1686,20 +1737,20 @@ export default function IupPlanPage() {
                     hidden
                     onChange={onSelectPhotoFile}
                   />
-                  <span className="muted-sm iup-avatar-help">Klicka för att byta bild</span>
+                  <span className="muted-sm iup-avatar-help">{messages.iup.clickToChangePhoto}</span>
                   {showPhotoActions ? (
                     <div className="card iup-photo-menu">
                       <button type="button" onClick={() => filePickerRef.current?.click()}>
-                        Välj från enhet
+                        {messages.iup.chooseFromDevice}
                       </button>
                       <button type="button" onClick={() => cameraPickerRef.current?.click()}>
-                        Bilder / fota
+                        {messages.iup.imagesOrCamera}
                       </button>
                       <button
                         type="button"
                         onClick={() => setShowPhotoLinkInput((current) => !current)}
                       >
-                        Använd länk
+                        {messages.iup.useLink}
                       </button>
                       {playerInfo?.photoUrl ? (
                         <button
@@ -1710,7 +1761,7 @@ export default function IupPlanPage() {
                             setShowPhotoLinkInput(false);
                           }}
                         >
-                          Ta bort bild
+                          {messages.iup.removeImage}
                         </button>
                       ) : null}
                       {showPhotoLinkInput ? (
@@ -1721,7 +1772,7 @@ export default function IupPlanPage() {
                             placeholder="https://..."
                           />
                           <button type="button" onClick={onApplyPhotoLink}>
-                            Spara länk
+                            {messages.iup.saveLink}
                           </button>
                         </div>
                       ) : null}
@@ -1732,12 +1783,12 @@ export default function IupPlanPage() {
             </div>
             <div className="iup-profile-content">
               <div className="iup-profile-main">
-                <strong className="iup-player-name">{playerInfo?.name ?? "Spelare"}</strong>
+                <strong className="iup-player-name">{playerInfo?.name ?? messages.iup.playerFallback}</strong>
                 <div className="iup-profile-groups">
                   <div className="iup-profile-group">
-                    <span className="iup-profile-group-title">Basdata</span>
+                    <span className="iup-profile-group-title">{messages.iup.baseData}</span>
                     <div className="cluster">
-                      <span className="pill">{playerInfo?.teamName ?? "Lag saknas"}</span>
+                      <span className="pill">{playerInfo?.teamName ?? messages.iup.teamMissing}</span>
                       {playerInfo?.positionLabel ? (
                         <span className="pill">{playerInfo.positionLabel}</span>
                       ) : null}
@@ -1745,18 +1796,18 @@ export default function IupPlanPage() {
                         <span className="pill">#{playerInfo.number}</span>
                       ) : null}
                       {playerInfo?.birthDate ? (
-                        <span className="pill">Född: {playerInfo.birthDate}</span>
+                        <span className="pill">{messages.iup.born}: {playerInfo.birthDate}</span>
                       ) : null}
                       {playerInfo?.birthDate ? (
-                        <span className="pill">Ålder: {getAge(playerInfo.birthDate)}</span>
+                        <span className="pill">{messages.iup.age}: {getAge(playerInfo.birthDate)}</span>
                       ) : null}
                     </div>
                   </div>
                   <div className="iup-profile-group">
-                    <span className="iup-profile-group-title">Fysik</span>
+                    <span className="iup-profile-group-title">{messages.iup.physics}</span>
                     <div className="cluster">
                       {playerInfo?.dominantFoot ? (
-                        <span className="pill">Fot: {playerInfo.dominantFoot}</span>
+                        <span className="pill">{messages.iup.foot}: {playerInfo.dominantFoot}</span>
                       ) : null}
                       {playerInfo?.heightCm ? (
                         <span className="pill">{playerInfo.heightCm} cm</span>
@@ -1770,10 +1821,10 @@ export default function IupPlanPage() {
                     </div>
                   </div>
                   <div className="iup-profile-group">
-                    <span className="iup-profile-group-title">Bakgrund</span>
+                    <span className="iup-profile-group-title">{messages.iup.background}</span>
                     <div className="cluster">
                       {playerInfo?.birthDate ? (
-                        <span className="pill">Födelseår: {getBirthYear(playerInfo.birthDate)}</span>
+                        <span className="pill">{messages.iup.birthYear}: {getBirthYear(playerInfo.birthDate)}</span>
                       ) : null}
                       {playerInfo?.nationality ? (
                         <span className="pill">Nationalitet: {playerInfo.nationality}</span>
@@ -1786,7 +1837,7 @@ export default function IupPlanPage() {
                 </div>
                 {playerInfo?.injuryNotes ? (
                   <p className="iup-note">
-                    <strong>Skade-/medicinsk notering:</strong> {playerInfo.injuryNotes}
+                    <strong>{messages.iup.medicalNote}:</strong> {playerInfo.injuryNotes}
                   </p>
                 ) : null}
               </div>
@@ -1799,8 +1850,8 @@ export default function IupPlanPage() {
                         type="button"
                         onClick={onCompleteReviewPoint}
                         disabled={saving}
-                        title="Markera återkoppling klar"
-                        aria-label="Markera återkoppling klar"
+                        title={messages.iup.markReviewDone}
+                        aria-label={messages.iup.markReviewDone}
                         className="icon-btn"
                       >
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
@@ -1813,8 +1864,8 @@ export default function IupPlanPage() {
                       type="button"
                       onClick={onArchive}
                       disabled={saving || planStatus === "archived"}
-                      title="Arkivera"
-                      aria-label="Arkivera"
+                      title={messages.iup.archive}
+                      aria-label={messages.iup.archive}
                       className="icon-btn"
                     >
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
@@ -1825,8 +1876,8 @@ export default function IupPlanPage() {
                       type="button"
                       onClick={onDelete}
                       disabled={saving}
-                      title="Ta bort"
-                      aria-label="Ta bort"
+                      title={messages.iup.delete}
+                      aria-label={messages.iup.delete}
                       className="icon-btn"
                     >
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
@@ -1844,10 +1895,10 @@ export default function IupPlanPage() {
                   >
                     {reviewPoints.map((point, index) => (
                       <option key={point.id} value={point.id}>
-                        {(point.label || `Tillfälle ${index + 1}`) +
+                        {(point.label || `${messages.iup.sessionPrefix} ${index + 1}`) +
                           (point.dueDate ? ` • ${point.dueDate}` : "") +
-                          (point.skipped ? " • Hoppad över" : "") +
-                          (point.completedAt ? " • Klar" : "")}
+                          (point.skipped ? ` • ${messages.iup.reviewSkipped}` : "") +
+                          (point.completedAt ? ` • ${messages.iup.reviewDone}` : "")}
                       </option>
                     ))}
                   </select>
@@ -1865,15 +1916,15 @@ export default function IupPlanPage() {
               {canEditPlan && activeReviewPoint?.completedAt && !activeReviewPointEditable ? (
                 <div className="toolbar">
                   <button type="button" onClick={onUnlockReviewPoint}>
-                    Lås upp för redigering
+                    {messages.iup.unlockForEditing}
                   </button>
                 </div>
               ) : null}
               {!activeReviewPointEditable ? (
                 <p className="alert-warning">
                   {activeReviewPoint?.skipped
-                    ? "Denna återkoppling är hoppad över och öppnas i läsläge."
-                    : "Denna återkoppling är klar och öppnas i läsläge tills du låser upp den."}
+                    ? messages.iup.skippedReadOnly
+                    : messages.iup.completedReadOnly}
                 </p>
               ) : null}
             </div>
@@ -1903,7 +1954,7 @@ export default function IupPlanPage() {
               })}
             </div>
             <div className="step-help">
-              <strong>Steg {step + 1}: {stepLabels[step]}</strong>
+              <strong>{messages.iup.stepPrefix} {step + 1}: {stepLabels[step]}</strong>
               <div className="step-help-text">
                 {stepDescriptions[step]}
               </div>
@@ -1916,10 +1967,10 @@ export default function IupPlanPage() {
           >
             {step === 0 ? (
               <>
-                <h3 className="section-h3">Spelarprofil</h3>
+                <h3 className="section-h3">{messages.iup.playerProfile}</h3>
                 <div className="iup-profile-editor">
                   <div className="card form-stack iup-profile-section">
-                    <strong className="iup-profile-group-title">Basdata</strong>
+                    <strong className="iup-profile-group-title">{messages.iup.baseData}</strong>
                     <div className="row wrap">
                       <input
                         value={playerInfo?.name ?? ""}
@@ -1928,7 +1979,7 @@ export default function IupPlanPage() {
                             current ? { ...current, name: event.target.value } : current
                           )
                         }
-                        placeholder="Namn"
+                        placeholder={messages.squad.name}
                       />
                       <input
                         value={typeof playerInfo?.number === "number" ? String(playerInfo.number) : ""}
@@ -1944,7 +1995,7 @@ export default function IupPlanPage() {
                               : current
                           )
                         }
-                        placeholder="Nummer"
+                        placeholder={messages.home.number}
                         className="input-short"
                       />
                       <input
@@ -1954,7 +2005,7 @@ export default function IupPlanPage() {
                             current ? { ...current, positionLabel: event.target.value } : current
                           )
                         }
-                        placeholder="Favoritposition"
+                        placeholder={messages.iup.favoritePosition}
                       />
                       <input
                         type="date"
@@ -1969,7 +2020,7 @@ export default function IupPlanPage() {
                   </div>
 
                   <div className="card form-stack iup-profile-section">
-                    <strong className="iup-profile-group-title">Fysik</strong>
+                    <strong className="iup-profile-group-title">{messages.iup.physics}</strong>
                     <div className="row wrap">
                       <input
                         value={playerInfo?.dominantFoot ?? ""}
@@ -1978,7 +2029,7 @@ export default function IupPlanPage() {
                             current ? { ...current, dominantFoot: event.target.value } : current
                           )
                         }
-                        placeholder="Dominant foot"
+                        placeholder={messages.squad.dominantFoot}
                       />
                       <input
                         value={typeof playerInfo?.heightCm === "number" ? String(playerInfo.heightCm) : ""}
@@ -1994,7 +2045,7 @@ export default function IupPlanPage() {
                               : current
                           )
                         }
-                        placeholder="Längd cm"
+                        placeholder={messages.squad.heightCm}
                         className="input-short"
                       />
                       <input
@@ -2011,14 +2062,14 @@ export default function IupPlanPage() {
                               : current
                           )
                         }
-                        placeholder="Vikt kg"
+                        placeholder={messages.squad.weightKg}
                         className="input-short"
                       />
                     </div>
                   </div>
 
                   <div className="card form-stack iup-profile-section">
-                    <strong className="iup-profile-group-title">Bakgrund</strong>
+                    <strong className="iup-profile-group-title">{messages.iup.background}</strong>
                     <div className="row wrap">
                       <input
                         value={playerInfo?.nationality ?? ""}
@@ -2027,7 +2078,7 @@ export default function IupPlanPage() {
                             current ? { ...current, nationality: event.target.value } : current
                           )
                         }
-                        placeholder="Nationalitet"
+                        placeholder={messages.squad.nationality}
                       />
                       <input
                         value={playerInfo?.birthPlace ?? ""}
@@ -2036,17 +2087,16 @@ export default function IupPlanPage() {
                             current ? { ...current, birthPlace: event.target.value } : current
                           )
                         }
-                        placeholder="Födelseort"
+                        placeholder={messages.squad.birthPlace}
                       />
                     </div>
                     <p className="iup-note">
-                      Klicka på profilbilden ovan för att välja bild från enhet, bilder/fota
-                      eller lägga in en bildlänk.
+                      {messages.iup.photoHint}
                     </p>
                   </div>
 
                   <div className="card form-stack iup-profile-section">
-                    <strong className="iup-profile-group-title">Medicinsk info</strong>
+                    <strong className="iup-profile-group-title">{messages.iup.medicalInfo}</strong>
                     <textarea
                       value={playerInfo?.injuryNotes ?? ""}
                       onChange={(event) =>
@@ -2054,7 +2104,7 @@ export default function IupPlanPage() {
                           current ? { ...current, injuryNotes: event.target.value } : current
                         )
                       }
-                      placeholder="Skade-/medicinsk notering"
+                      placeholder={messages.squad.injuryNotes}
                       className="text-area-md"
                     />
                   </div>
@@ -2064,9 +2114,9 @@ export default function IupPlanPage() {
 
             {step === 1 ? (
               <>
-                <h3 className="section-h3">Nu-läge</h3>
+                <h3 className="section-h3">{messages.iup.currentState}</h3>
                 <div className="form-stack">
-                  <strong>Självskattning (1-5)</strong>
+                  <strong>{messages.iup.selfAssessment}</strong>
                   <div className="assessment-grid">
                     {selfAssessment.map((item, index) => (
                       <div key={`${item.area}-${index}`} className="card assessment-card">
@@ -2074,7 +2124,7 @@ export default function IupPlanPage() {
                           <strong>{assessmentAreas[index] ?? item.area}</strong>
                           <div className="assessment-scores">
                             <label className="assessment-score-field">
-                              <span className="assessment-score-label">Spelare</span>
+                              <span className="assessment-score-label">{messages.iup.player}</span>
                               <select
                                 value={String(item.score)}
                                 onChange={(event) =>
@@ -2095,7 +2145,7 @@ export default function IupPlanPage() {
                             </label>
                             {isSignedIn && showCoachAssessment ? (
                               <label className="assessment-score-field">
-                                <span className="assessment-score-label">Coach</span>
+                                <span className="assessment-score-label">{messages.iup.coach}</span>
                                 <select
                                   value={String(item.coachScore ?? 3)}
                                   onChange={(event) =>
@@ -2122,7 +2172,7 @@ export default function IupPlanPage() {
                           onChange={(event) =>
                             updateAssessment(index, "note", event.target.value)
                           }
-                          placeholder="Kort kommentar"
+                          placeholder={messages.home.notesPlaceholder}
                           className="text-area-sm"
                         />
                       </div>
@@ -2132,7 +2182,7 @@ export default function IupPlanPage() {
                 <textarea
                   value={nowState}
                   onChange={(event) => setNowState(event.target.value)}
-                  placeholder="Beskriv spelarens nu-läge"
+                  placeholder={messages.iup.currentState}
                   className="text-area-md"
                 />
               </>
@@ -2140,10 +2190,10 @@ export default function IupPlanPage() {
 
             {step === 2 ? (
               <>
-                <h3 className="section-h3">Kortsiktiga mål (1-3 månader)</h3>
+                <h3 className="section-h3">{messages.iup.shortGoals}</h3>
                 <div className="card form-stack">
                   <div className="toolbar">
-                    <label className="muted">Mål-förslag efter position</label>
+                    <label className="muted">{messages.iup.suggestionsByPosition}</label>
                     <select
                       value={shortSuggestionFilter}
                       onChange={(event) =>
@@ -2151,17 +2201,19 @@ export default function IupPlanPage() {
                       }
                       className="input-medium"
                     >
-                      <option value="all">Alla</option>
-                      <option value="gk">Målvakt</option>
-                      <option value="def">Försvarare</option>
-                      <option value="mid">Mittfältare</option>
-                      <option value="fwd">Anfallare</option>
+                      <option value="all">{messages.iup.all}</option>
+                      <option value="gk">{messages.iup.goalkeeper}</option>
+                      <option value="def">{messages.iup.defender}</option>
+                      <option value="mid">{messages.iup.midfielder}</option>
+                      <option value="fwd">{messages.iup.forward}</option>
                     </select>
                   </div>
                   <div className="goal-groups">
                     {groupedShortSuggestions.map((group) => (
                       <div key={`short-group-${group.category}`} className="goal-group">
-                        <strong className="goal-group-label">{group.category}</strong>
+                        <strong className="goal-group-label">
+                          {getSuggestionCategoryLabel(group.category, messages)}
+                        </strong>
                         <div className="toolbar">
                           {group.suggestions.map((suggestion) => (
                             (() => {
@@ -2189,7 +2241,7 @@ export default function IupPlanPage() {
                                         );
                                       }}
                                       role="button"
-                                      aria-label={isExpanded ? "Dölj förklaring" : "Visa förklaring"}
+                                      aria-label={isExpanded ? messages.iup.hideExplanation : messages.iup.showExplanation}
                                       tabIndex={0}
                                       onKeyDown={(event) => {
                                         if (event.key === "Enter" || event.key === " ") {
@@ -2234,12 +2286,12 @@ export default function IupPlanPage() {
                     ))}
                   </div>
                   <div className="goal-custom-add">
-                    <label className="goal-custom-label">Eget mål</label>
+                    <label className="goal-custom-label">{messages.iup.ownGoal}</label>
                     <div className="toolbar">
                       <input
                         value={shortCustomGoal}
                         onChange={(event) => setShortCustomGoal(event.target.value)}
-                        placeholder="Lägg till eget mål"
+                        placeholder={messages.iup.addOwnGoal}
                         className="input-wide"
                       />
                       <button
@@ -2250,27 +2302,27 @@ export default function IupPlanPage() {
                           )
                         }
                       >
-                        Lägg till
+                        {messages.iup.add}
                       </button>
                     </div>
                   </div>
                 </div>
                 <div className="goal-list">
-                  <strong className="goal-selected-title">Valda mål</strong>
+                  <strong className="goal-selected-title">{messages.iup.selectedGoals}</strong>
                   {shortGoals.length === 0 ? (
-                    <p className="muted-line">Inga mål valda ännu.</p>
+                    <p className="muted-line">{messages.iup.noGoalsSelected}</p>
                   ) : shortGoals.map((goal, index) => (
                     <div key={`short-${index}`} className="goal-item">
                       <span className="goal-selected-dot" aria-hidden>
                         ✓
                       </span>
-                      <span>{goal.title || "Mål"}</span>
+                      <span>{goal.title || messages.iup.goalFallback}</span>
                       <button
                         type="button"
                         className="goal-remove"
                         onClick={() => removeGoal(setShortGoals, index)}
-                        aria-label={`Ta bort mål ${index + 1}`}
-                        title="Ta bort mål"
+                        aria-label={`${messages.iup.removeGoal} ${index + 1}`}
+                        title={messages.iup.removeGoal}
                       >
                         x
                       </button>
@@ -2278,11 +2330,11 @@ export default function IupPlanPage() {
                   ))}
                 </div>
                 <div className="form-stack">
-                  <label className="muted">Kommentar om kortsiktiga mål</label>
+                  <label className="muted">{messages.iup.shortComment}</label>
                   <textarea
                     value={shortGoalsComment}
                     onChange={(event) => setShortGoalsComment(event.target.value)}
-                    placeholder="Tankar från spelare/ledare om kortsiktiga mål och utveckling"
+                    placeholder={messages.iup.shortGoalsPlaceholder}
                     className="text-area-sm"
                   />
                 </div>
@@ -2291,10 +2343,10 @@ export default function IupPlanPage() {
 
             {step === 3 ? (
               <>
-                <h3 className="section-h3">Långsiktiga mål (6-12 månader)</h3>
+                <h3 className="section-h3">{messages.iup.longGoals}</h3>
                 <div className="card form-stack">
                   <div className="toolbar">
-                    <label className="muted">Mål-förslag efter position</label>
+                    <label className="muted">{messages.iup.suggestionsByPosition}</label>
                     <select
                       value={longSuggestionFilter}
                       onChange={(event) =>
@@ -2302,17 +2354,19 @@ export default function IupPlanPage() {
                       }
                       className="input-medium"
                     >
-                      <option value="all">Alla</option>
-                      <option value="gk">Målvakt</option>
-                      <option value="def">Försvarare</option>
-                      <option value="mid">Mittfältare</option>
-                      <option value="fwd">Anfallare</option>
+                      <option value="all">{messages.iup.all}</option>
+                      <option value="gk">{messages.iup.goalkeeper}</option>
+                      <option value="def">{messages.iup.defender}</option>
+                      <option value="mid">{messages.iup.midfielder}</option>
+                      <option value="fwd">{messages.iup.forward}</option>
                     </select>
                   </div>
                   <div className="goal-groups">
                     {groupedLongSuggestions.map((group) => (
                       <div key={`long-group-${group.category}`} className="goal-group">
-                        <strong className="goal-group-label">{group.category}</strong>
+                        <strong className="goal-group-label">
+                          {getSuggestionCategoryLabel(group.category, messages)}
+                        </strong>
                         <div className="toolbar">
                           {group.suggestions.map((suggestion) => (
                             (() => {
@@ -2340,7 +2394,7 @@ export default function IupPlanPage() {
                                         );
                                       }}
                                       role="button"
-                                      aria-label={isExpanded ? "Dölj förklaring" : "Visa förklaring"}
+                                      aria-label={isExpanded ? messages.iup.hideExplanation : messages.iup.showExplanation}
                                       tabIndex={0}
                                       onKeyDown={(event) => {
                                         if (event.key === "Enter" || event.key === " ") {
@@ -2385,12 +2439,12 @@ export default function IupPlanPage() {
                     ))}
                   </div>
                   <div className="goal-custom-add">
-                    <label className="goal-custom-label">Eget mål</label>
+                    <label className="goal-custom-label">{messages.iup.ownGoal}</label>
                     <div className="toolbar">
                       <input
                         value={longCustomGoal}
                         onChange={(event) => setLongCustomGoal(event.target.value)}
-                        placeholder="Lägg till eget mål"
+                        placeholder={messages.iup.addOwnGoal}
                         className="input-wide"
                       />
                       <button
@@ -2401,27 +2455,27 @@ export default function IupPlanPage() {
                           )
                         }
                       >
-                        Lägg till
+                        {messages.iup.add}
                       </button>
                     </div>
                   </div>
                 </div>
                 <div className="goal-list">
-                  <strong className="goal-selected-title">Valda mål</strong>
+                  <strong className="goal-selected-title">{messages.iup.selectedGoals}</strong>
                   {longGoals.length === 0 ? (
-                    <p className="muted-line">Inga mål valda ännu.</p>
+                    <p className="muted-line">{messages.iup.noGoalsSelected}</p>
                   ) : longGoals.map((goal, index) => (
                     <div key={`long-${index}`} className="goal-item">
                       <span className="goal-selected-dot" aria-hidden>
                         ✓
                       </span>
-                      <span>{goal.title || "Mål"}</span>
+                      <span>{goal.title || messages.iup.goalFallback}</span>
                       <button
                         type="button"
                         className="goal-remove"
                         onClick={() => removeGoal(setLongGoals, index)}
-                        aria-label={`Ta bort mål ${index + 1}`}
-                        title="Ta bort mål"
+                        aria-label={`${messages.iup.removeGoal} ${index + 1}`}
+                        title={messages.iup.removeGoal}
                       >
                         x
                       </button>
@@ -2429,11 +2483,11 @@ export default function IupPlanPage() {
                   ))}
                 </div>
                 <div className="form-stack">
-                  <label className="muted">Kommentar om långsiktiga mål</label>
+                  <label className="muted">{messages.iup.longComment}</label>
                   <textarea
                     value={longGoalsComment}
                     onChange={(event) => setLongGoalsComment(event.target.value)}
-                    placeholder="Tankar från spelare/ledare om långsiktiga mål och utveckling"
+                    placeholder={messages.iup.longGoalsPlaceholder}
                     className="text-area-sm"
                   />
                 </div>
@@ -2442,38 +2496,38 @@ export default function IupPlanPage() {
 
             {step === 4 ? (
               <>
-                <h3 className="section-h3">Sammanfattning</h3>
+                <h3 className="section-h3">{messages.iup.summary}</h3>
                 <div className="card form-stack">
                   <span>
-                    <strong>Periodtyp:</strong> {cycleType === "season" ? "Säsong" : "Kalenderår"}
+                    <strong>{messages.iup.periodType}:</strong> {cycleType === "season" ? messages.iup.season : messages.iup.calendarYear}
                   </span>
                   <span>
-                    <strong>{cycleType === "season" ? "Säsong" : "År"}:</strong> {cycleLabel || "-"}
+                    <strong>{cycleType === "season" ? messages.iup.season : messages.iup.year}:</strong> {cycleLabel || "-"}
                   </span>
                   <span>
-                    <strong>Start:</strong> {periodStart || "-"}
+                    <strong>{messages.iup.start}:</strong> {periodStart || "-"}
                   </span>
                   <span>
-                    <strong>Slut:</strong> {periodEnd || "-"}
+                    <strong>{messages.iup.end}:</strong> {periodEnd || "-"}
                   </span>
                   <span>
-                    <strong>Återkopplingar:</strong> {reviewCadenceLabel}
+                    <strong>{messages.iup.reviews}:</strong> {reviewCadenceLabel}
                   </span>
                   <span>
-                    <strong>Övrigt:</strong> {otherNotes || "-"}
+                    <strong>{messages.iup.other}:</strong> {otherNotes || "-"}
                   </span>
                   <span>
-                    <strong>Kommentar kortsiktiga mål:</strong> {shortGoalsComment || "-"}
+                    <strong>{messages.iup.shortGoalsCommentLabel}:</strong> {shortGoalsComment || "-"}
                   </span>
                   <span>
-                    <strong>Kommentar långsiktiga mål:</strong> {longGoalsComment || "-"}
+                    <strong>{messages.iup.longGoalsCommentLabel}:</strong> {longGoalsComment || "-"}
                   </span>
                 </div>
                 <p className="muted-line">
-                  Dessa uppgifter sätts när du skapar IUP:n.
+                  {messages.iup.summaryInfo}
                 </p>
                 <div className="card form-stack">
-                  <strong>Återkopplingsplan</strong>
+                  <strong>{messages.iup.reviewPlan}</strong>
                   {reviewPoints.map((point, index) => {
                     const suggestion = suggestedReviewPeriod(
                       index,
@@ -2485,9 +2539,9 @@ export default function IupPlanPage() {
                     return (
                       <div key={point.id} className="row row-between wrap">
                         <span>
-                          <strong>{point.label || `Tillfälle ${index + 1}`}</strong>
-                          {point.skipped ? " • Hoppad över" : ""}
-                          {point.completedAt ? " • Klar" : ""}
+                          <strong>{point.label || `${messages.iup.sessionPrefix} ${index + 1}`}</strong>
+                          {point.skipped ? ` • ${messages.iup.reviewSkipped}` : ""}
+                          {point.completedAt ? ` • ${messages.iup.reviewDone}` : ""}
                         </span>
                         <div className="toolbar">
                           <input
@@ -2496,7 +2550,7 @@ export default function IupPlanPage() {
                               onChangeReviewPointPeriod(point.id, event.target.value)
                             }
                             disabled={!canEditPlan || !!point.completedAt || !!point.skipped}
-                            placeholder={suggestion || "Egen period"}
+                            placeholder={suggestion || messages.iup.customPeriod}
                             className="input-medium"
                           />
                           {canEditPlan && !point.completedAt && !point.skipped && suggestion && point.dueDate !== suggestion ? (
@@ -2504,7 +2558,7 @@ export default function IupPlanPage() {
                               type="button"
                               onClick={() => onApplySuggestedReviewDate(point.id, index)}
                             >
-                              Använd förslag
+                              {messages.iup.useSuggestionAction}
                             </button>
                           ) : null}
                           {canEditPlan ? (
@@ -2512,7 +2566,7 @@ export default function IupPlanPage() {
                               type="button"
                               onClick={() => onToggleSkipReviewPoint(point.id)}
                             >
-                              {point.skipped ? "Återställ" : "Hoppa över"}
+                              {point.skipped ? messages.iup.reset : messages.iup.skip}
                             </button>
                           ) : null}
                         </div>
@@ -2538,7 +2592,7 @@ export default function IupPlanPage() {
               }}
               disabled={step === 0 || !!error}
             >
-              Föregående
+              {messages.iup.previous}
             </button>
             <div className="row gap-8">
               <button
@@ -2555,16 +2609,16 @@ export default function IupPlanPage() {
                 }}
                 disabled={saving || !!error}
               >
-                {step === 4 ? "Klar" : `Nästa${nextStepLabel ? `: ${nextStepLabel}` : ""}`}
+                {step === 4 ? messages.iup.complete : `${messages.iup.next}${nextStepLabel ? `: ${nextStepLabel}` : ""}`}
               </button>
               <button className="primary" onClick={onSave} disabled={!canSave || !canEditPlan || !!error}>
                 {saving
-                  ? "Sparar..."
+                  ? messages.iup.saving
                   : !canEditPlan
-                    ? "Läsläge"
+                    ? messages.iup.roleReadOnly
                     : localDraftSource
-                      ? "Spara lokalt"
-                      : "Spara IUP"}
+                      ? messages.iup.saveLocal
+                      : messages.iup.saveIup}
               </button>
             </div>
           </div>

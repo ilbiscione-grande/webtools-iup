@@ -354,6 +354,36 @@ export default function SquadPage() {
 
   return (
     <main className="app-shell">
+      <div className="iup-top-actions">
+        <Link
+          href="/settings"
+          className="iup-top-icon"
+          title={messages.settings.pageTitle}
+          aria-label={messages.settings.pageTitle}
+        >
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            xmlns="http://www.w3.org/2000/svg"
+            aria-hidden
+          >
+            <path
+              d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z"
+              stroke="currentColor"
+              strokeWidth="1.8"
+            />
+            <path
+              d="M19.3 12a7.8 7.8 0 0 0-.07-1l2-1.55-1.9-3.3-2.4.78a7.9 7.9 0 0 0-1.73-1L14.8 3h-3.6l-.42 2.93a7.9 7.9 0 0 0-1.73 1l-2.4-.78-1.9 3.3 2 1.55a7.8 7.8 0 0 0 0 2l-2 1.55 1.9 3.3 2.4-.78a7.9 7.9 0 0 0 1.73 1L11.2 21h3.6l.42-2.93a7.9 7.9 0 0 0 1.73-1l2.4.78 1.9-3.3-2-1.55c.05-.33.07-.66.07-1Z"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </Link>
+      </div>
+
       <section className="page-hero">
         <div className="page-title">
           <h1>{messages.squad.title}</h1>
