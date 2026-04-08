@@ -3,525 +3,34 @@
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { CurrentStateStep } from "./components/CurrentStateStep";
+import { CheckinsSection } from "./components/CheckinsSection";
+import { GoalsStep } from "./components/GoalsStep";
+import { IupHeader } from "./components/IupHeader";
+import { PlayerProfileStep } from "./components/PlayerProfileStep";
+import { useIupAuthInit } from "./hooks/useIupAuthInit";
+import { useIupPlanLoader } from "./hooks/useIupPlanLoader";
+import { useIupPhotoState } from "./hooks/useIupPhotoState";
+import { useIupSaveActions } from "./hooks/useIupSaveActions";
+import { useIupSuggestionsState } from "./hooks/useIupSuggestionsState";
+import { SummaryStep } from "./components/SummaryStep";
+import { useIupReviewState } from "./hooks/useIupReviewState";
 import { useI18n } from "@/lib/i18n";
 import {
-  archiveIupPlan,
-  deleteIupPlan,
-  fetchIupPlanEditor,
-  saveIupPlanEditor,
-  updateIupPlayerProfile,
-} from "../../../lib/iupApi";
-import { supabase } from "../../../lib/supabaseClient";
+  createIupCheckin,
+  deleteIupCheckin,
+  fetchIupCheckins,
+  type IupCheckin,
+} from "@/lib/iupApi";
 import {
-  longGoalSuggestions,
-  shortGoalSuggestions,
-  type GoalSuggestion,
-  type PositionGroup,
-} from "../../../lib/goalSuggestions";
-
-type GoalRow = {
-  title: string;
-  description: string;
-};
-
-type AssessmentRow = {
-  area: string;
-  score: number;
-  note: string;
-  coachScore?: number;
-};
-
-type ReviewPoint = {
-  id: string;
-  label: string;
-  dueDate: string;
-  note: string;
-  nowState?: string;
-  selfAssessment?: AssessmentRow[];
-  completedAt?: string;
-  unlockedForEdit?: boolean;
-  skipped?: boolean;
-};
-
-const assessmentAreas = ["Teknik", "Taktik", "Fysik", "Mentalitet"] as const;
-
-const clampScore = (value: unknown) => {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) {
-    return 3;
-  }
-  return Math.min(5, Math.max(1, Math.round(numeric)));
-};
-
-const normalizeAssessment = (rows?: Partial<AssessmentRow>[]): AssessmentRow[] =>
-  assessmentAreas.map((area, index) => {
-    const source =
-      rows?.find((entry) => (entry.area ?? "").toLowerCase() === area.toLowerCase()) ??
-      rows?.[index];
-    return {
-      area,
-      score: clampScore(source?.score),
-      note: source?.note?.trim() ?? "",
-      coachScore: clampScore(source?.coachScore),
-    };
-  });
-
-const defaultAssessment = (): AssessmentRow[] => normalizeAssessment();
-
-const AUTH_LOCAL_DRAFTS_KEY_PREFIX = "iup:auth:local-drafts:";
-const FREE_SESSION_DRAFTS_KEY = "iup:free:session-drafts";
-const GOAL_COMMENTS_META_PREFIX = "__IUP_GOAL_META__:";
-
-const pad2 = (value: number) => String(value).padStart(2, "0");
-
-type ReviewCadenceKind =
-  | "spring_fall"
-  | "spring_summer_fall"
-  | "quarterly"
-  | "bi_monthly"
-  | "monthly"
-  | "bi_weekly"
-  | "weekly"
-  | "custom";
-
-const reviewWindowDaysByCadence: Record<ReviewCadenceKind, number> = {
-  spring_fall: 30,
-  spring_summer_fall: 30,
-  quarterly: 30,
-  bi_monthly: 14,
-  monthly: 10,
-  bi_weekly: 5,
-  weekly: 3,
-  custom: 7,
-};
-
-const formatIsoDate = (date: Date) =>
-  `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
-
-const decodeOtherNotesMeta = (raw?: string) => {
-  const text = (raw ?? "").trim();
-  if (!text.startsWith(GOAL_COMMENTS_META_PREFIX)) {
-    return {
-      otherNotes: raw ?? "",
-      shortGoalsComment: "",
-      longGoalsComment: "",
-    };
-  }
-  try {
-    const parsed = JSON.parse(text.slice(GOAL_COMMENTS_META_PREFIX.length)) as {
-      otherNotes?: string;
-      shortGoalsComment?: string;
-      longGoalsComment?: string;
-    };
-    return {
-      otherNotes: parsed.otherNotes ?? "",
-      shortGoalsComment: parsed.shortGoalsComment ?? "",
-      longGoalsComment: parsed.longGoalsComment ?? "",
-    };
-  } catch {
-    return {
-      otherNotes: raw ?? "",
-      shortGoalsComment: "",
-      longGoalsComment: "",
-    };
-  }
-};
-
-const encodeOtherNotesMeta = (
-  otherNotes: string,
-  shortGoalsComment: string,
-  longGoalsComment: string
-) => {
-  const short = shortGoalsComment.trim();
-  const long = longGoalsComment.trim();
-  const base = otherNotes.trim();
-  if (!short && !long) {
-    return base;
-  }
-  return (
-    GOAL_COMMENTS_META_PREFIX +
-    JSON.stringify({
-      otherNotes: base,
-      shortGoalsComment: short,
-      longGoalsComment: long,
-    })
-  );
-};
-
-const suggestedReviewPeriod = (
-  index: number,
-  count: number,
-  periodStart?: string,
-  periodEnd?: string,
-  cadence: ReviewCadenceKind = "custom"
-) => {
-  if (!periodStart || !periodEnd) {
-    return "";
-  }
-  const startDate = new Date(`${periodStart}T00:00:00`);
-  const endDate = new Date(`${periodEnd}T00:00:00`);
-  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
-    return "";
-  }
-  if (count <= 0) {
-    return "";
-  }
-  const totalMs = endDate.getTime() - startDate.getTime();
-  if (totalMs <= 0) {
-    return formatIsoDate(startDate);
-  }
-  const centerRatio = Math.min(1, Math.max(0, (index + 0.5) / count));
-  const anchor = new Date(startDate.getTime() + totalMs * centerRatio);
-  const windowDays = reviewWindowDaysByCadence[cadence] ?? reviewWindowDaysByCadence.custom;
-  const half = Math.floor(windowDays / 2);
-  const rangeStart = new Date(anchor);
-  rangeStart.setDate(rangeStart.getDate() - half);
-  const rangeEnd = new Date(rangeStart);
-  rangeEnd.setDate(rangeEnd.getDate() + (windowDays - 1));
-
-  if (rangeStart < startDate) {
-    rangeStart.setTime(startDate.getTime());
-  }
-  if (rangeEnd > endDate) {
-    rangeEnd.setTime(endDate.getTime());
-  }
-  return `${formatIsoDate(rangeStart)} - ${formatIsoDate(rangeEnd)}`;
-};
-
-const defaultReviewLabel = (index: number, prefix = "Tillfälle") => `${prefix} ${index + 1}`;
-
-const buildReviewPoints = (
-  count: number,
-  periodStart?: string,
-  periodEnd?: string,
-  current?: ReviewPoint[],
-  labelPrefix?: string
-): ReviewPoint[] => {
-  const safeCount = Math.max(1, count || 3);
-  const points: ReviewPoint[] = [];
-
-  for (let i = 0; i < safeCount; i += 1) {
-    const existing = current?.[i];
-    const dueDate = existing?.dueDate ?? "";
-    points.push({
-      id: existing?.id ?? `rp-${i + 1}`,
-      label: existing?.label ?? defaultReviewLabel(i, labelPrefix),
-      dueDate,
-      note: existing?.note ?? "",
-      nowState: existing?.nowState ?? "",
-      selfAssessment: existing?.selfAssessment ?? undefined,
-      completedAt: existing?.completedAt,
-      unlockedForEdit: existing?.unlockedForEdit ?? false,
-      skipped: existing?.skipped ?? false,
-    });
-  }
-  return points;
-};
-
-const getSeasonDefaults = (baseYear: number) => ({
-  cycleLabel: `${baseYear}/${baseYear + 1}`,
-  periodStart: `${baseYear}-08-01`,
-  periodEnd: `${baseYear + 1}-06-30`,
-});
-
-const getYearDefaults = (year: number) => ({
-  cycleLabel: String(year),
-  periodStart: `${year}-01-01`,
-  periodEnd: `${year}-12-31`,
-});
-
-const inferPositionGroup = (positionLabel?: string): PositionGroup => {
-  const p = (positionLabel ?? "").toUpperCase();
-  if (p.includes("GK") || p.includes("GOALKEEPER")) {
-    return "gk";
-  }
-  if (
-    p.includes("MITTBACK") ||
-    p.includes("BACK") ||
-    p.includes("FÖRSVAR") ||
-    p.includes("FORSVAR") ||
-    p.includes("CB") ||
-    p.includes("LB") ||
-    p.includes("RB") ||
-    p.includes("WB") ||
-    p.includes("DEF")
-  ) {
-    return "def";
-  }
-  if (
-    p.includes("CM") ||
-    p.includes("DM") ||
-    p.includes("AM") ||
-    p.includes("MID")
-  ) {
-    return "mid";
-  }
-  if (
-    p.includes("ST") ||
-    p.includes("CF") ||
-    p.includes("FW") ||
-    p.includes("RW") ||
-    p.includes("LW") ||
-    p.includes("ATT")
-  ) {
-    return "fwd";
-  }
-  return "all";
-};
-
-const customSuggestionsKey = (horizon: "short" | "long") =>
-  `iup:customGoalSuggestions:${horizon}`;
-
-const normalizeSuggestion = (
-  entry: Partial<GoalSuggestion>
-): GoalSuggestion | null => {
-  if (!entry.title?.trim() || !entry.description?.trim()) {
-    return null;
-  }
-  const rawGroups = Array.isArray(entry.groups) ? entry.groups : ["all"];
-  const validGroups = rawGroups.filter((group): group is PositionGroup =>
-    ["all", "gk", "def", "mid", "fwd"].includes(group)
-  );
-  return {
-    title: entry.title.trim(),
-    description: entry.description.trim(),
-    groups: validGroups.length > 0 ? validGroups : ["all"],
-  };
-};
-
-const mergeUniqueSuggestions = (...groups: GoalSuggestion[][]): GoalSuggestion[] => {
-  const seen = new Set<string>();
-  const merged: GoalSuggestion[] = [];
-  for (const list of groups) {
-    for (const entry of list) {
-      const key = `${entry.title.toLowerCase()}::${entry.description.toLowerCase()}`;
-      if (seen.has(key)) {
-        continue;
-      }
-      seen.add(key);
-      merged.push(entry);
-    }
-  }
-  return merged;
-};
-
-type SuggestionCategory =
-  | "Teknik"
-  | "Mentalt"
-  | "Fysik"
-  | "Anfall"
-  | "Försvar"
-  | "Taktik"
-  | "Målvakt"
-  | "Återhämtning"
-  | "Övrigt";
-
-const suggestionCategoryOrder: SuggestionCategory[] = [
-  "Teknik",
-  "Taktik",
-  "Anfall",
-  "Försvar",
-  "Målvakt",
-  "Fysik",
-  "Mentalt",
-  "Återhämtning",
-  "Övrigt",
-];
-
-const inferSuggestionCategory = (suggestion: GoalSuggestion): SuggestionCategory => {
-  const text = `${suggestion.title} ${suggestion.description}`.toLowerCase();
-
-  if (suggestion.groups.includes("gk")) {
-    return "Målvakt";
-  }
-  if (
-    text.includes("återhämt") ||
-    text.includes("sömn") ||
-    text.includes("kost") ||
-    text.includes("skade")
-  ) {
-    return "Återhämtning";
-  }
-  if (
-    text.includes("mental") ||
-    text.includes("fokus") ||
-    text.includes("självständig") ||
-    text.includes("tålamod") ||
-    text.includes("ledarskap")
-  ) {
-    return "Mentalt";
-  }
-  if (
-    text.includes("fys") ||
-    text.includes("snabb") ||
-    text.includes("uthåll") ||
-    text.includes("styrk") ||
-    text.includes("bmi")
-  ) {
-    return "Fysik";
-  }
-  if (
-    text.includes("avslut") ||
-    text.includes("box") ||
-    text.includes("djupled") ||
-    text.includes("inlägg") ||
-    text.includes("målpoäng") ||
-    text.includes("1v1 offensivt")
-  ) {
-    return "Anfall";
-  }
-  if (
-    text.includes("försvar") ||
-    text.includes("återerövr") ||
-    text.includes("duell") ||
-    text.includes("backlinje") ||
-    text.includes("markering") ||
-    text.includes("press")
-  ) {
-    return "Försvar";
-  }
-  if (
-    text.includes("spelbar") ||
-    text.includes("pass") ||
-    text.includes("position") ||
-    text.includes("taktik") ||
-    text.includes("linje") ||
-    text.includes("tempo")
-  ) {
-    return "Taktik";
-  }
-  if (
-    text.includes("touch") ||
-    text.includes("teknik") ||
-    text.includes("mottag") ||
-    text.includes("dribbling") ||
-    text.includes("skott")
-  ) {
-    return "Teknik";
-  }
-  return "Övrigt";
-};
-
-const groupSuggestionsByCategory = (suggestions: GoalSuggestion[]) => {
-  const groups = new Map<SuggestionCategory, GoalSuggestion[]>();
-  for (const suggestion of suggestions) {
-    const category = inferSuggestionCategory(suggestion);
-    const list = groups.get(category) ?? [];
-    list.push(suggestion);
-    groups.set(category, list);
-  }
-  return suggestionCategoryOrder
-    .map((category) => ({
-      category,
-      suggestions: (groups.get(category) ?? []).sort((a, b) =>
-        a.title.localeCompare(b.title, "sv")
-      ),
-    }))
-    .filter((entry) => entry.suggestions.length > 0);
-};
-
-const preferredCategoryByPositionGroup = (
-  group: PositionGroup
-): SuggestionCategory | null => {
-  if (group === "def") return "Försvar";
-  if (group === "fwd") return "Anfall";
-  if (group === "mid") return "Teknik";
-  if (group === "gk") return "Målvakt";
-  return null;
-};
-
-const prioritizeCategoryGroup = (
-  groups: Array<{ category: SuggestionCategory; suggestions: GoalSuggestion[] }>,
-  preferred: SuggestionCategory | null
-) => {
-  if (!preferred) {
-    return groups;
-  }
-  const match = groups.find((entry) => entry.category === preferred);
-  if (!match) {
-    return groups;
-  }
-  return [match, ...groups.filter((entry) => entry.category !== preferred)];
-};
-
-const getSuggestionCategoryLabel = (
-  category: SuggestionCategory,
-  messages: ReturnType<typeof useI18n>["messages"]
-) => {
-  switch (category) {
-    case "Teknik":
-      return messages.iup.categoryTechnique;
-    case "Taktik":
-      return messages.iup.categoryTactics;
-    case "Anfall":
-      return messages.iup.categoryAttack;
-    case "Försvar":
-      return messages.iup.categoryDefense;
-    case "Målvakt":
-      return messages.iup.categoryGoalkeeper;
-    case "Fysik":
-      return messages.iup.categoryPhysical;
-    case "Mentalt":
-      return messages.iup.categoryMental;
-    case "Återhämtning":
-      return messages.iup.categoryRecovery;
-    default:
-      return messages.iup.categoryOther;
-  }
-};
-
-const getBirthYear = (birthDate?: string) => {
-  if (!birthDate) {
-    return "";
-  }
-  const year = new Date(`${birthDate}T00:00:00`).getFullYear();
-  return Number.isNaN(year) ? "" : String(year);
-};
-
-const getAge = (birthDate?: string) => {
-  if (!birthDate) {
-    return "";
-  }
-  const dob = new Date(`${birthDate}T00:00:00`);
-  if (Number.isNaN(dob.getTime())) {
-    return "";
-  }
-  const today = new Date();
-  let age = today.getFullYear() - dob.getFullYear();
-  const beforeBirthday =
-    today.getMonth() < dob.getMonth() ||
-    (today.getMonth() === dob.getMonth() && today.getDate() < dob.getDate());
-  if (beforeBirthday) {
-    age -= 1;
-  }
-  return age > 0 ? String(age) : "";
-};
-
-const getBmi = (heightCm?: number, weightKg?: number) => {
-  if (!heightCm || !weightKg || heightCm <= 0 || weightKg <= 0) {
-    return "";
-  }
-  const meters = heightCm / 100;
-  const bmi = weightKg / (meters * meters);
-  return bmi.toFixed(1);
-};
-
-const readFileAsDataUrl = (file: File) =>
-  new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === "string") {
-        resolve(reader.result);
-        return;
-      }
-      reject(new Error("Could not read file."));
-    };
-    reader.onerror = () => reject(new Error("Could not read file."));
-    reader.readAsDataURL(file);
-  });
+  getReviewCadenceConfig,
+  type GoalRow,
+  type PlayerInfo,
+} from "@/lib/iup/editorUtils";
 
 export default function IupPlanPage() {
   const { messages } = useI18n();
+  const reviewCadenceConfig = useMemo(() => getReviewCadenceConfig(messages), [messages]);
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const planId = params?.id ?? "";
@@ -545,6 +54,12 @@ export default function IupPlanPage() {
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [step, setStep] = useState(0);
+  const [checkins, setCheckins] = useState<IupCheckin[]>([]);
+  const [checkinsLoading, setCheckinsLoading] = useState(false);
+  const [checkinNote, setCheckinNote] = useState("");
+  const [checkinRating, setCheckinRating] = useState("");
+  const [checkinGoalId, setCheckinGoalId] = useState("");
+  const [checkinReviewPointId, setCheckinReviewPointId] = useState("");
 
   const [title, setTitle] = useState("IUP Plan");
   const [planStatus, setPlanStatus] = useState<
@@ -554,55 +69,13 @@ export default function IupPlanPage() {
   const [periodEnd, setPeriodEnd] = useState("");
   const [cycleType, setCycleType] = useState<"year" | "season">("season");
   const [cycleLabel, setCycleLabel] = useState("");
-  const [nowState, setNowState] = useState("");
   const [shortGoals, setShortGoals] = useState<GoalRow[]>([]);
   const [longGoals, setLongGoals] = useState<GoalRow[]>([]);
   const [otherNotes, setOtherNotes] = useState("");
   const [shortGoalsComment, setShortGoalsComment] = useState("");
   const [longGoalsComment, setLongGoalsComment] = useState("");
-  const [selfAssessment, setSelfAssessment] = useState<AssessmentRow[]>(
-    defaultAssessment()
-  );
-  const [reviewCount, setReviewCount] = useState(3);
-  const [reviewPoints, setReviewPoints] = useState<ReviewPoint[]>([]);
-  const [selectedReviewPointId, setSelectedReviewPointId] = useState("");
-  const [playerInfo, setPlayerInfo] = useState<{
-    id?: string;
-    name: string;
-    teamName?: string;
-    positionLabel?: string;
-    number?: number;
-    birthDate?: string;
-    dominantFoot?: string;
-    heightCm?: number;
-    weightKg?: number;
-    nationality?: string;
-    birthPlace?: string;
-    injuryNotes?: string;
-    photoUrl?: string;
-  } | null>(null);
-  const [showPhotoActions, setShowPhotoActions] = useState(false);
-  const [showPhotoLinkInput, setShowPhotoLinkInput] = useState(false);
-  const [photoLinkDraft, setPhotoLinkDraft] = useState("");
-  const [shortSuggestionFilter, setShortSuggestionFilter] =
-    useState<PositionGroup>("all");
-  const [longSuggestionFilter, setLongSuggestionFilter] =
-    useState<PositionGroup>("all");
-  const [shortCustomGoal, setShortCustomGoal] = useState("");
-  const [longCustomGoal, setLongCustomGoal] = useState("");
-  const [expandedShortSuggestions, setExpandedShortSuggestions] = useState<string[]>([]);
-  const [expandedLongSuggestions, setExpandedLongSuggestions] = useState<string[]>([]);
-  const [isSignedIn, setIsSignedIn] = useState(false);
-  const [signedInEmail, setSignedInEmail] = useState("");
-  const [signedInUserId, setSignedInUserId] = useState<string | null>(null);
+  const [playerInfo, setPlayerInfo] = useState<PlayerInfo>(null);
   const [planCreatedBy, setPlanCreatedBy] = useState<string | null>(null);
-  const [showCoachAssessment, setShowCoachAssessment] = useState(false);
-  const [customShortSuggestions, setCustomShortSuggestions] = useState<
-    GoalSuggestion[]
-  >([]);
-  const [customLongSuggestions, setCustomLongSuggestions] = useState<
-    GoalSuggestion[]
-  >([]);
   const [localDraftSource, setLocalDraftSource] = useState<{
     mode: "FREE" | "AUTH";
     userId?: string | null;
@@ -610,454 +83,121 @@ export default function IupPlanPage() {
   const filePickerRef = useRef<HTMLInputElement | null>(null);
   const cameraPickerRef = useRef<HTMLInputElement | null>(null);
 
+  const {
+    isSignedIn,
+    signedInUserId,
+    showCoachAssessment,
+  } = useIupAuthInit();
+
+  const {
+    shortSuggestionFilter,
+    longSuggestionFilter,
+    shortCustomGoal,
+    longCustomGoal,
+    expandedShortSuggestions,
+    expandedLongSuggestions,
+    customShortSuggestions,
+    customLongSuggestions,
+    groupedShortSuggestions,
+    groupedLongSuggestions,
+    setShortSuggestionFilter,
+    setLongSuggestionFilter,
+    setShortCustomGoal,
+    setLongCustomGoal,
+    setExpandedShortSuggestions,
+    setExpandedLongSuggestions,
+    setCustomShortSuggestions,
+    setCustomLongSuggestions,
+    applySuggestion,
+    isGoalSelected,
+    toggleExpandedSuggestion,
+    addCustomGoal,
+  } = useIupSuggestionsState({ playerInfo, isSignedIn });
+
+  const {
+    nowState,
+    selfAssessment,
+    reviewCount,
+    reviewPoints,
+    selectedReviewPointId,
+    activeReviewPoint,
+    activeReviewPointEditable,
+    reviewCadenceKind,
+    reviewCadenceLabel,
+    setNowState,
+    setSelfAssessment,
+    setReviewCount,
+    setReviewPoints,
+    setSelectedReviewPointId,
+    persistCurrentReviewAnswers,
+    updateAssessment,
+    onSelectReviewPoint,
+    onCompleteReviewPoint,
+    onUnlockReviewPoint,
+    onToggleSkipReviewPoint,
+    onChangeReviewPointPeriod,
+    onApplySuggestedReviewDate,
+  } = useIupReviewState({
+    messages,
+    canEditPlan: Boolean(localDraftSource) || (!!isSignedIn && !!planCreatedBy && !!signedInUserId && signedInUserId === planCreatedBy),
+    periodStart,
+    periodEnd,
+    reviewCadenceConfig,
+  });
+
+  const {
+    showPhotoActions,
+    showPhotoLinkInput,
+    photoLinkDraft,
+    setShowPhotoActions,
+    setShowPhotoLinkInput,
+    setPhotoLinkDraft,
+    onSelectPhotoFile,
+    onApplyPhotoLink,
+    onRemovePhoto,
+  } = useIupPhotoState({
+    messages,
+    setPlayerInfo,
+    setStatus,
+  });
+
   const canSave = useMemo(() => !!planId && !saving, [planId, saving]);
-  const filteredShortSuggestions = useMemo(
-    () =>
-      mergeUniqueSuggestions(shortGoalSuggestions, customShortSuggestions).filter(
-        (suggestion) =>
-          shortSuggestionFilter === "all" ||
-          suggestion.groups.includes(shortSuggestionFilter)
-      ),
-    [customShortSuggestions, shortSuggestionFilter]
-  );
-  const filteredLongSuggestions = useMemo(
-    () =>
-      mergeUniqueSuggestions(longGoalSuggestions, customLongSuggestions).filter(
-        (suggestion) =>
-          longSuggestionFilter === "all" ||
-          suggestion.groups.includes(longSuggestionFilter)
-      ),
-    [customLongSuggestions, longSuggestionFilter]
-  );
-  const preferredSuggestionCategory = useMemo(
-    () => preferredCategoryByPositionGroup(inferPositionGroup(playerInfo?.positionLabel)),
-    [playerInfo?.positionLabel]
-  );
-  const groupedShortSuggestions = useMemo(
-    () =>
-      prioritizeCategoryGroup(
-        groupSuggestionsByCategory(filteredShortSuggestions),
-        preferredSuggestionCategory
-      ),
-    [filteredShortSuggestions, preferredSuggestionCategory]
-  );
-  const groupedLongSuggestions = useMemo(
-    () =>
-      prioritizeCategoryGroup(
-        groupSuggestionsByCategory(filteredLongSuggestions),
-        preferredSuggestionCategory
-      ),
-    [filteredLongSuggestions, preferredSuggestionCategory]
-  );
-  const activeReviewPoint = useMemo(
-    () => reviewPoints.find((point) => point.id === selectedReviewPointId) ?? null,
-    [reviewPoints, selectedReviewPointId]
-  );
-  const activeReviewPointIndex = useMemo(
-    () => reviewPoints.findIndex((point) => point.id === selectedReviewPointId),
-    [reviewPoints, selectedReviewPointId]
-  );
-  const activeReviewPointEditable = useMemo(
-    () =>
-      !activeReviewPoint?.skipped &&
-      (!activeReviewPoint?.completedAt || !!activeReviewPoint?.unlockedForEdit),
-    [activeReviewPoint]
-  );
 
-  const persistCurrentReviewAnswers = (overrideId?: string) => {
-    const targetId = overrideId ?? selectedReviewPointId;
-    if (!targetId) {
-      return;
-    }
-    setReviewPoints((current) =>
-      current.map((point) =>
-        point.id === targetId
-          ? {
-              ...point,
-              nowState,
-              selfAssessment: selfAssessment.map((entry) => ({ ...entry })),
-            }
-          : point
-      )
-    );
-  };
-
-  useEffect(() => {
-    const readCoachVisibility = () => {
-      if (typeof window === "undefined") {
-        return;
-      }
-      const saved = window.localStorage.getItem("iup:showCoachAssessment");
-      setShowCoachAssessment(saved === "1");
-    };
-    readCoachVisibility();
-    const loadCustomSuggestions = () => {
-      if (typeof window === "undefined") {
-        return;
-      }
-      try {
-        const shortRaw = window.localStorage.getItem(customSuggestionsKey("short"));
-        const longRaw = window.localStorage.getItem(customSuggestionsKey("long"));
-        const shortParsed = shortRaw ? (JSON.parse(shortRaw) as GoalSuggestion[]) : [];
-        const longParsed = longRaw ? (JSON.parse(longRaw) as GoalSuggestion[]) : [];
-        setCustomShortSuggestions(
-          shortParsed.map((entry) => normalizeSuggestion(entry)).filter(Boolean) as GoalSuggestion[]
-        );
-        setCustomLongSuggestions(
-          longParsed.map((entry) => normalizeSuggestion(entry)).filter(Boolean) as GoalSuggestion[]
-        );
-      } catch {
-        setCustomShortSuggestions([]);
-        setCustomLongSuggestions([]);
-      }
-    };
-    loadCustomSuggestions();
-
-    const loadAuth = async () => {
-      if (!supabase) {
-        setIsSignedIn(false);
-        setSignedInEmail("");
-        setSignedInUserId(null);
-        return;
-      }
-      const { data } = await supabase.auth.getUser();
-      if (data.user) {
-        setIsSignedIn(true);
-        setSignedInEmail(data.user.email ?? "");
-        setSignedInUserId(data.user.id);
-      } else {
-        setIsSignedIn(false);
-        setSignedInEmail("");
-        setSignedInUserId(null);
-      }
-    };
-    loadAuth();
-  }, []);
-
-  useEffect(() => {
-    const load = async () => {
-      if (!planId) {
-        setError(messages.iup.missingId);
-        setLoading(false);
-        return;
-      }
-      setLoading(true);
-      const result = await fetchIupPlanEditor(planId);
-      setLoading(false);
-      if (!result.ok) {
-        try {
-          let localDraft: {
-            id: string;
-            playerName: string;
-            title: string;
-            mainFocus: string;
-            currentLevel: string;
-            targetLevel: string;
-            notes: string;
-            createdAt: string;
-          } | null = null;
-          let source: { mode: "FREE" | "AUTH"; userId?: string | null } | null = null;
-
-          const freeRaw = window.sessionStorage.getItem(FREE_SESSION_DRAFTS_KEY);
-          if (freeRaw) {
-            const freeList = JSON.parse(freeRaw) as Array<typeof localDraft extends infer U ? U : never>;
-            if (Array.isArray(freeList)) {
-              localDraft = (freeList as any[]).find((entry) => entry?.id === planId) ?? null;
-              if (localDraft) {
-                source = { mode: "FREE" };
-              }
-            }
-          }
-
-          if (!localDraft && supabase) {
-            const { data } = await supabase.auth.getUser();
-            const authUserId = data.user?.id;
-            if (authUserId) {
-              const authRaw = window.localStorage.getItem(
-                AUTH_LOCAL_DRAFTS_KEY_PREFIX + authUserId
-              );
-              if (authRaw) {
-                const authList = JSON.parse(authRaw) as Array<typeof localDraft extends infer U ? U : never>;
-                if (Array.isArray(authList)) {
-                  localDraft = (authList as any[]).find((entry) => entry?.id === planId) ?? null;
-                  if (localDraft) {
-                    source = { mode: "AUTH", userId: authUserId };
-                  }
-                }
-              }
-            }
-          }
-
-          if (!localDraft) {
-            setError(result.error);
-            return;
-          }
-
-          const year = new Date().getFullYear();
-          const defaults = getSeasonDefaults(year);
-
-          setLocalDraftSource(source);
-          setPlanCreatedBy(null);
-          setTitle(localDraft.title || messages.iup.localDraftTitleFallback);
-          setPlanStatus("active");
-          setPeriodStart(defaults.periodStart);
-          setPeriodEnd(defaults.periodEnd);
-          setCycleType("season");
-          setCycleLabel(defaults.cycleLabel);
-          const decodedDraftNotes = decodeOtherNotesMeta(localDraft.notes || "");
-          setOtherNotes(decodedDraftNotes.otherNotes);
-          setShortGoalsComment(decodedDraftNotes.shortGoalsComment);
-          setLongGoalsComment(decodedDraftNotes.longGoalsComment);
-          const baseAssessment = defaultAssessment();
-          setReviewCount(3);
-          const draftPoints = buildReviewPoints(
-            3,
-            defaults.periodStart,
-            defaults.periodEnd,
-            undefined,
-            messages.iup.sessionPrefix
-          ).map((point, idx) => ({
-            ...point,
-            nowState: idx === 0 ? localDraft.currentLevel || "" : "",
-            selfAssessment: baseAssessment.map((entry) => ({ ...entry })),
-          }));
-          setReviewPoints(draftPoints);
-          setSelectedReviewPointId(draftPoints[0]?.id ?? "");
-          setNowState(draftPoints[0]?.nowState ?? "");
-          setSelfAssessment(
-            draftPoints[0]?.selfAssessment?.map((entry) => ({ ...entry })) ??
-              baseAssessment
-          );
-          setShortGoals(
-            localDraft.mainFocus?.trim()
-              ? [
-                  {
-                    title: localDraft.mainFocus.trim(),
-                    description: "",
-                  },
-                ]
-              : []
-          );
-          setLongGoals(
-            localDraft.targetLevel?.trim()
-              ? [{ title: localDraft.targetLevel.trim(), description: "" }]
-              : []
-          );
-          setPlayerInfo({
-            name: localDraft.playerName || messages.iup.unnamedPlayer,
-            teamName:
-              source?.mode === "AUTH"
-                ? messages.iup.authLocalTeam
-                : messages.iup.freeTemporaryTeam,
-          });
-          setPhotoLinkDraft("");
-          setShortSuggestionFilter("all");
-          setLongSuggestionFilter("all");
-          setError(null);
-          setStatus(messages.iup.localDraftModeSavedDevice);
-          return;
-        } catch {
-          setError(result.error);
-          return;
-        }
-      }
-      setLocalDraftSource(null);
-      const { plan, goals, player } = result.data;
-      setPlanCreatedBy(plan.createdBy ?? null);
-      const start = plan.periodStart ?? "";
-      const end = plan.periodEnd ?? "";
-      const count = plan.reviewCount ?? 3;
-
-      setTitle(plan.title || "IUP Plan");
-      setPlanStatus(
-        plan.status === "archived"
-          ? "archived"
-          : plan.status === "completed"
-            ? "completed"
-            : "active"
-      );
-      setPeriodStart(start);
-      setPeriodEnd(end);
-      setCycleType(plan.cycleType ?? "season");
-      setCycleLabel(plan.cycleLabel ?? "");
-      const decodedPlanNotes = decodeOtherNotesMeta(plan.otherNotes ?? "");
-      setOtherNotes(decodedPlanNotes.otherNotes);
-      setShortGoalsComment(decodedPlanNotes.shortGoalsComment);
-      setLongGoalsComment(decodedPlanNotes.longGoalsComment);
-      const baseAssessment = normalizeAssessment(plan.selfAssessment ?? []);
-      setReviewCount(count);
-      const loadedReviewPoints =
-        buildReviewPoints(
-          count,
-          start,
-          end,
-          (plan.reviewPoints ?? []).map((point) => ({
-            id: point.id,
-            label: point.label,
-            dueDate: point.dueDate ?? "",
-            note: point.note,
-            nowState: point.nowState ?? "",
-            completedAt: point.completedAt,
-            unlockedForEdit: point.unlockedForEdit ?? false,
-            skipped: point.skipped ?? false,
-            selfAssessment:
-              point.selfAssessment?.map((entry) => ({
-                area: entry.area,
-                score: Math.min(5, Math.max(1, entry.score || 3)),
-                note: entry.note,
-                coachScore:
-                  typeof entry.coachScore === "number"
-                    ? Math.min(5, Math.max(1, entry.coachScore))
-                    : undefined,
-              })) ?? undefined,
-          })),
-          messages.iup.sessionPrefix
-        );
-      const normalizedReviewPoints = loadedReviewPoints.map((point, idx) => ({
-        ...point,
-        nowState:
-          point.nowState ??
-          (idx === 0 ? plan.nowState ?? "" : ""),
-        unlockedForEdit: point.unlockedForEdit ?? false,
-        skipped: point.skipped ?? false,
-        selfAssessment:
-          normalizeAssessment(point.selfAssessment ?? baseAssessment).map((entry) => ({
-            ...entry,
-          })),
-      }));
-      setReviewPoints(normalizedReviewPoints);
-      setSelectedReviewPointId(normalizedReviewPoints[0]?.id ?? "");
-      setNowState(normalizedReviewPoints[0]?.nowState ?? "");
-      setSelfAssessment(
-        normalizeAssessment(normalizedReviewPoints[0]?.selfAssessment ?? baseAssessment)
-      );
-
-      const short = goals
-        .filter((goal) => goal.horizon === "short")
-        .map((goal) => ({ title: goal.title, description: goal.description }));
-      const long = goals
-        .filter((goal) => goal.horizon === "long")
-        .map((goal) => ({ title: goal.title, description: goal.description }));
-
-      setShortGoals(short.length > 0 ? short : []);
-      setLongGoals(long.length > 0 ? long : []);
-      setPlayerInfo(
-        player
-          ? {
-              id: player.id,
-              name: player.name,
-              teamName: player.teamName,
-              positionLabel: player.positionLabel,
-              number: player.number,
-              birthDate: player.birthDate,
-              dominantFoot: player.dominantFoot,
-              heightCm: player.heightCm,
-              weightKg: player.weightKg,
-              nationality: player.nationality,
-              birthPlace: player.birthPlace,
-              injuryNotes: player.injuryNotes,
-              photoUrl: player.photoUrl,
-            }
-          : null
-      );
-      setPhotoLinkDraft(player?.photoUrl ?? "");
-
-      const positionGroup = inferPositionGroup(player?.positionLabel);
-      setShortSuggestionFilter(positionGroup);
-      setLongSuggestionFilter(positionGroup);
-
-      setError(null);
-      setStatus(null);
-    };
-    load();
-  }, [
-    messages.iup.authLocalTeam,
-    messages.iup.freeTemporaryTeam,
-    messages.iup.localDraftModeSavedDevice,
-    messages.iup.localDraftTitleFallback,
-    messages.iup.missingId,
-    messages.iup.unnamedPlayer,
+  useIupPlanLoader({
     planId,
-  ]);
-
-  useEffect(() => {
-    if (!selectedReviewPointId) {
-      return;
-    }
-    const selected = reviewPoints.find((point) => point.id === selectedReviewPointId);
-    if (!selected) {
-      return;
-    }
-    setNowState(selected.nowState ?? "");
-    setSelfAssessment(
-      normalizeAssessment(selected.selfAssessment)
-    );
-  }, [reviewPoints, selectedReviewPointId]);
+    messages,
+    setLoading,
+    setError,
+    setStatus,
+    setLocalDraftSource,
+    setPlanCreatedBy,
+    setTitle,
+    setPlanStatus,
+    setPeriodStart,
+    setPeriodEnd,
+    setCycleType,
+    setCycleLabel,
+    setOtherNotes,
+    setShortGoalsComment,
+    setLongGoalsComment,
+    setReviewCount,
+    setReviewPoints,
+    setSelectedReviewPointId,
+    setNowState,
+    setSelfAssessment,
+    setShortGoals,
+    setLongGoals,
+    setPlayerInfo,
+    setPhotoLinkDraft,
+    setShortSuggestionFilter,
+    setLongSuggestionFilter,
+  });
 
   const removeGoal = (
     setter: React.Dispatch<React.SetStateAction<GoalRow[]>>,
     index: number
   ) => {
     setter((current) => current.filter((_, i) => i !== index));
-  };
-
-  const updateAssessment = (
-    index: number,
-    field: "score" | "note" | "coachScore",
-    value: string | number
-  ) => {
-    setSelfAssessment((current) => {
-      const next = [...current];
-      next[index] = { ...next[index], [field]: value } as AssessmentRow;
-      return next;
-    });
-  };
-
-  const applySuggestion = (
-    setter: React.Dispatch<React.SetStateAction<GoalRow[]>>,
-    suggestion: GoalSuggestion
-  ) => {
-    setter((current) => {
-      const exists = current.some(
-        (goal) =>
-          goal.title.trim().toLowerCase() === suggestion.title.trim().toLowerCase() &&
-          goal.description.trim().toLowerCase() ===
-            suggestion.description.trim().toLowerCase()
-      );
-      if (exists) {
-        return current;
-      }
-      return [
-        ...current,
-        { title: suggestion.title, description: suggestion.description },
-      ];
-    });
-  };
-  const isGoalSelected = (goals: GoalRow[], suggestion: GoalSuggestion) =>
-    goals.some(
-      (goal) =>
-        goal.title.trim().toLowerCase() === suggestion.title.trim().toLowerCase() &&
-        goal.description.trim().toLowerCase() === suggestion.description.trim().toLowerCase()
-    );
-  const toggleExpandedSuggestion = (
-    setter: React.Dispatch<React.SetStateAction<string[]>>,
-    key: string
-  ) => {
-    setter((current) =>
-      current.includes(key) ? current.filter((entry) => entry !== key) : [...current, key]
-    );
-  };
-  const addCustomGoal = (
-    setter: React.Dispatch<React.SetStateAction<GoalRow[]>>,
-    value: string,
-    clear: () => void
-  ) => {
-    const trimmed = value.trim();
-    if (!trimmed) {
-      return;
-    }
-    setter((current) => [...current, { title: trimmed, description: "" }]);
-    clear();
   };
   const canManagePlan = useMemo(
     () =>
@@ -1072,6 +212,65 @@ export default function IupPlanPage() {
     () => Boolean(localDraftSource) || canManagePlan,
     [localDraftSource, canManagePlan]
   );
+  const isPlayerViewer = useMemo(
+    () =>
+      !localDraftSource &&
+      !!signedInUserId &&
+      !!playerInfo?.userId &&
+      signedInUserId === playerInfo.userId &&
+      !canManagePlan,
+    [canManagePlan, localDraftSource, playerInfo?.userId, signedInUserId]
+  );
+  const canPlayerSelfAssess = useMemo(
+    () => isPlayerViewer && activeReviewPointEditable && planStatus !== "archived",
+    [activeReviewPointEditable, isPlayerViewer, planStatus]
+  );
+  const canCreateCheckin = useMemo(
+    () => (canManagePlan || isPlayerViewer) && planStatus !== "archived",
+    [canManagePlan, isPlayerViewer, planStatus]
+  );
+  const canEditCurrentStep = useMemo(
+    () => canEditPlan || (step === 1 && canPlayerSelfAssess),
+    [canEditPlan, canPlayerSelfAssess, step]
+  );
+  const { onSave, onComplete, onArchive, onDelete } = useIupSaveActions({
+    messages,
+    planId,
+    canEditPlan,
+    canPlayerSelfAssess,
+    canManagePlan,
+    step,
+    title,
+    periodStart,
+    periodEnd,
+    cycleType,
+    cycleLabel,
+    nowState,
+    otherNotes,
+    shortGoalsComment,
+    longGoalsComment,
+    reviewCount,
+    reviewPoints,
+    reviewCadenceKind,
+    reviewCadenceConfig,
+    selectedReviewPointId,
+    selfAssessment,
+    shortGoals,
+    longGoals,
+    shortSuggestionFilter,
+    longSuggestionFilter,
+    customShortSuggestions,
+    customLongSuggestions,
+    playerInfo,
+    localDraftSource,
+    persistCurrentReviewAnswers,
+    setSaving,
+    setStatus,
+    setPlanStatus,
+    setCustomShortSuggestions,
+    setCustomLongSuggestions,
+    navigateHome: () => router.push("/"),
+  });
   const stepCompletion = useMemo(() => {
     const step0Complete = !!playerInfo?.name?.trim();
     const step1Complete = nowState.trim().length > 0;
@@ -1083,565 +282,87 @@ export default function IupPlanPage() {
     );
     return [step0Complete, step1Complete, step2Complete, step3Complete, true] as const;
   }, [longGoals, nowState, playerInfo?.name, shortGoals]);
-  const currentStepComplete = useMemo(() => stepCompletion[step], [step, stepCompletion]);
   const stepProgress = useMemo(
     () => ((step + 1) / stepLabels.length) * 100,
     [step]
+  );
+  const checkinGoalOptions = useMemo(
+    () =>
+      [...shortGoals, ...longGoals].filter(
+        (goal) => !!goal.id && !!(goal.title.trim() || goal.description.trim())
+      ),
+    [longGoals, shortGoals]
   );
   const nextStepLabel = useMemo(
     () => (step < stepLabels.length - 1 ? stepLabels[step + 1] : ""),
     [step]
   );
-  const reviewCadenceLabel = useMemo(() => {
-    const labels = reviewPoints.map((point) => point.label.trim().toLowerCase());
-    const hasSpring = labels.includes("vår");
-    const hasSummer = labels.includes("sommar");
-    const hasFall = labels.includes("höst");
-    if (hasSpring && hasFall && labels.length === 2) {
-      return messages.iup.cadenceSpringFall;
-    }
-    if (hasSpring && hasSummer && hasFall && labels.length === 3) {
-      return messages.iup.cadenceSpringSummerFall;
-    }
-    if (
-      labels.length === 4 &&
-      labels.every((label) => label.startsWith("q") || label.startsWith("kvartal"))
-    ) {
-      return messages.iup.cadenceQuarterly;
-    }
-    if (labels.length === 6 && labels.every((label) => label.startsWith("varannan månad"))) {
-      return messages.iup.cadenceBiMonthly;
-    }
-    if (labels.length === 12 && labels.every((label) => label.startsWith("månad"))) {
-      return messages.iup.cadenceMonthly;
-    }
-    if (labels.length === 26 && labels.every((label) => label.startsWith("varannan vecka"))) {
-      return messages.iup.cadenceBiWeekly;
-    }
-    if (labels.length === 52 && labels.every((label) => label.startsWith("vecka"))) {
-      return messages.iup.cadenceWeekly;
-    }
-    if (reviewCount === 6) {
-      return messages.iup.cadenceBiMonthly;
-    }
-    if (reviewCount === 12) {
-      return messages.iup.cadenceMonthly;
-    }
-    if (reviewCount === 26) {
-      return messages.iup.cadenceBiWeekly;
-    }
-    if (reviewCount === 52) {
-      return messages.iup.cadenceWeekly;
-    }
-    return `${reviewCount} ${messages.iup.sessionCountSuffix}`;
-  }, [
-    messages.iup.cadenceBiMonthly,
-    messages.iup.cadenceBiWeekly,
-    messages.iup.cadenceMonthly,
-    messages.iup.cadenceQuarterly,
-    messages.iup.cadenceSpringFall,
-    messages.iup.cadenceSpringSummerFall,
-    messages.iup.cadenceWeekly,
-    messages.iup.sessionCountSuffix,
-    reviewCount,
-    reviewPoints,
-  ]);
-  const reviewCadenceKind = useMemo<ReviewCadenceKind>(() => {
-    const labels = reviewPoints.map((point) => point.label.trim().toLowerCase());
-    const hasSpring = labels.includes("vår");
-    const hasSummer = labels.includes("sommar");
-    const hasFall = labels.includes("höst");
-    if (hasSpring && hasFall && labels.length === 2) {
-      return "spring_fall";
-    }
-    if (hasSpring && hasSummer && hasFall && labels.length === 3) {
-      return "spring_summer_fall";
-    }
-    if (
-      labels.length === 4 &&
-      labels.every((label) => label.startsWith("q") || label.startsWith("kvartal"))
-    ) {
-      return "quarterly";
-    }
-    if (labels.length === 6 && labels.every((label) => label.startsWith("varannan månad"))) {
-      return "bi_monthly";
-    }
-    if (labels.length === 12 && labels.every((label) => label.startsWith("månad"))) {
-      return "monthly";
-    }
-    if (labels.length === 26 && labels.every((label) => label.startsWith("varannan vecka"))) {
-      return "bi_weekly";
-    }
-    if (labels.length === 52 && labels.every((label) => label.startsWith("vecka"))) {
-      return "weekly";
-    }
-    if (reviewCount === 2) return "spring_fall";
-    if (reviewCount === 3) return "spring_summer_fall";
-    if (reviewCount === 4) return "quarterly";
-    if (reviewCount === 6) return "bi_monthly";
-    if (reviewCount === 12) return "monthly";
-    if (reviewCount === 26) return "bi_weekly";
-    if (reviewCount === 52) return "weekly";
-    return "custom";
-  }, [reviewCount, reviewPoints]);
-  const roleLabel = useMemo(() => {
-    if (localDraftSource?.mode === "AUTH") {
-      return messages.iup.roleAuthLocal;
-    }
-    if (localDraftSource?.mode === "FREE") {
-      return messages.iup.roleFreeTemp;
-    }
-    if (canManagePlan) {
-      return messages.iup.roleOwner;
-    }
-    return messages.iup.roleReadOnly;
-  }, [canManagePlan, localDraftSource, messages.iup.roleAuthLocal, messages.iup.roleFreeTemp, messages.iup.roleOwner, messages.iup.roleReadOnly]);
-
-  const applyPlayerPhotoUrl = (photoUrl?: string) => {
-    const nextUrl = photoUrl?.trim() || undefined;
-    setPlayerInfo((current) =>
-      current
-        ? {
-            ...current,
-            photoUrl: nextUrl,
-          }
-        : current
-    );
-    setPhotoLinkDraft(nextUrl ?? "");
-  };
-
-  const onSelectPhotoFile = async (
-    event: React.ChangeEvent<HTMLInputElement>
-  ) => {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-    if (!file) {
-      return;
-    }
-    if (!file.type.startsWith("image/")) {
-      setStatus(messages.iup.selectImageFile);
-      return;
-    }
-    if (file.size > 5 * 1024 * 1024) {
-      setStatus(messages.iup.imageTooLarge);
-      return;
-    }
-    try {
-      const dataUrl = await readFileAsDataUrl(file);
-      applyPlayerPhotoUrl(dataUrl);
-      setShowPhotoActions(false);
-      setShowPhotoLinkInput(false);
-      setStatus(messages.iup.profilePhotoUpdated);
-    } catch {
-      setStatus(messages.iup.couldNotReadImage);
-    }
-  };
-
-  const onApplyPhotoLink = () => {
-    applyPlayerPhotoUrl(photoLinkDraft);
-    setShowPhotoActions(false);
-    setShowPhotoLinkInput(false);
-    setStatus(
-      photoLinkDraft.trim()
-        ? messages.iup.profilePhotoLinkUpdated
-        : messages.iup.profilePhotoRemoved
-    );
-  };
-
-  const onSave = async () => {
-    if (!planId) {
-      return;
-    }
-    if (!canEditPlan) {
-      setStatus(messages.iup.noPermissionSave);
-      return;
-    }
-    persistCurrentReviewAnswers();
-
-    if (localDraftSource) {
-      setSaving(true);
-      try {
-        const updated = {
-          id: planId,
-          playerName: playerInfo?.name?.trim() || messages.iup.unnamedPlayer,
-          title: title.trim() || messages.iup.localDraftTitleFallback,
-          mainFocus:
-            shortGoals.find((goal) => goal.title.trim())?.title.trim() || "",
-          currentLevel: nowState.trim(),
-          targetLevel:
-            longGoals.find((goal) => goal.title.trim())?.title.trim() || "",
-          notes: encodeOtherNotesMeta(otherNotes, shortGoalsComment, longGoalsComment),
-          createdAt: new Date().toISOString(),
-        };
-
-        if (localDraftSource.mode === "AUTH" && localDraftSource.userId) {
-          const key = AUTH_LOCAL_DRAFTS_KEY_PREFIX + localDraftSource.userId;
-          const raw = window.localStorage.getItem(key);
-          const list = raw ? (JSON.parse(raw) as Array<typeof updated>) : [];
-          const next = Array.isArray(list)
-            ? list.map((entry) => (entry.id === planId ? updated : entry))
-            : [updated];
-          window.localStorage.setItem(key, JSON.stringify(next));
-        } else {
-          const raw = window.sessionStorage.getItem(FREE_SESSION_DRAFTS_KEY);
-          const list = raw ? (JSON.parse(raw) as Array<typeof updated>) : [];
-          const next = Array.isArray(list)
-            ? list.map((entry) => (entry.id === planId ? updated : entry))
-            : [updated];
-          window.sessionStorage.setItem(FREE_SESSION_DRAFTS_KEY, JSON.stringify(next));
-        }
-
-        setStatus(messages.iup.localDraftSaved);
-      } catch {
-        setStatus(messages.iup.couldNotSaveLocalDraft);
-      } finally {
-        setSaving(false);
-      }
-      return;
-    }
-
-    setSaving(true);
-    if (playerInfo?.id) {
-      const profileResult = await updateIupPlayerProfile(playerInfo.id, {
-        name: playerInfo.name,
-        number: playerInfo.number,
-        positionLabel: playerInfo.positionLabel,
-        birthDate: playerInfo.birthDate,
-        dominantFoot: playerInfo.dominantFoot,
-        heightCm: playerInfo.heightCm,
-        weightKg: playerInfo.weightKg,
-        nationality: playerInfo.nationality,
-        birthPlace: playerInfo.birthPlace,
-        injuryNotes: playerInfo.injuryNotes,
-        photoUrl: playerInfo.photoUrl,
-      });
-      if (!profileResult.ok) {
-        setSaving(false);
-        setStatus(profileResult.error);
-        return;
-      }
-    }
-    const result = await saveIupPlanEditor({
-      planId,
-      title,
-      periodStart: periodStart || undefined,
-      periodEnd: periodEnd || undefined,
-      nowState,
-      otherNotes: encodeOtherNotesMeta(otherNotes, shortGoalsComment, longGoalsComment),
-      reviewCount,
-      cycleType,
-      cycleLabel,
-      status: "active",
-      reviewPoints: reviewPoints.map((point, index) => ({
-        id: point.id || `rp-${index + 1}`,
-        label: point.label,
-        dueDate: point.dueDate || undefined,
-        note: point.note,
-        completedAt: point.completedAt,
-        unlockedForEdit: point.unlockedForEdit,
-        skipped: point.skipped,
-        nowState: point.id === selectedReviewPointId ? nowState : point.nowState ?? "",
-        selfAssessment:
-          point.id === selectedReviewPointId
-            ? selfAssessment.map((entry) => ({ ...entry }))
-            : point.selfAssessment?.map((entry) => ({ ...entry })) ??
-              defaultAssessment(),
-      })),
-      selfAssessment: selfAssessment.map((entry) => ({
-        area: entry.area,
-        score: entry.score,
-        note: entry.note,
-        coachScore: entry.coachScore,
-      })),
-      shortGoals: shortGoals.filter(
-        (goal) => goal.title.trim() || goal.description.trim()
-      ),
-      longGoals: longGoals.filter(
-        (goal) => goal.title.trim() || goal.description.trim()
-      ),
-    });
-    setSaving(false);
-    if (!result.ok) {
-      setStatus(result.error);
-      return;
-    }
-    if (typeof window !== "undefined") {
-      const toCustomSuggestions = (
-        goals: GoalRow[],
-        fallbackGroup: PositionGroup
-      ): GoalSuggestion[] =>
-        goals
-          .filter((goal) => goal.title.trim() && goal.description.trim())
-          .map((goal) => ({
-            title: goal.title.trim(),
-            description: goal.description.trim(),
-            groups: fallbackGroup === "all" ? ["all"] : ["all", fallbackGroup],
-          }));
-
-      const nextCustomShort = mergeUniqueSuggestions(
-        customShortSuggestions,
-        toCustomSuggestions(shortGoals, shortSuggestionFilter)
-      );
-      const nextCustomLong = mergeUniqueSuggestions(
-        customLongSuggestions,
-        toCustomSuggestions(longGoals, longSuggestionFilter)
-      );
-      window.localStorage.setItem(
-        customSuggestionsKey("short"),
-        JSON.stringify(nextCustomShort)
-      );
-      window.localStorage.setItem(
-        customSuggestionsKey("long"),
-        JSON.stringify(nextCustomLong)
-      );
-      setCustomShortSuggestions(nextCustomShort);
-      setCustomLongSuggestions(nextCustomLong);
-    }
-    setStatus(messages.iup.saved);
-    setPlanStatus("active");
-  };
-
-  const onComplete = async () => {
-    if (!planId || !canEditPlan) {
-      return;
-    }
-    if (step !== 4) {
-      setStatus(messages.iup.finishGuideBeforeComplete);
-      return;
-    }
-    persistCurrentReviewAnswers();
-    setSaving(true);
-    if (playerInfo?.id) {
-      const profileResult = await updateIupPlayerProfile(playerInfo.id, {
-        name: playerInfo.name,
-        number: playerInfo.number,
-        positionLabel: playerInfo.positionLabel,
-        birthDate: playerInfo.birthDate,
-        dominantFoot: playerInfo.dominantFoot,
-        heightCm: playerInfo.heightCm,
-        weightKg: playerInfo.weightKg,
-        nationality: playerInfo.nationality,
-        birthPlace: playerInfo.birthPlace,
-        injuryNotes: playerInfo.injuryNotes,
-        photoUrl: playerInfo.photoUrl,
-      });
-      if (!profileResult.ok) {
-        setSaving(false);
-        setStatus(profileResult.error);
-        return;
-      }
-    }
-    const result = await saveIupPlanEditor({
-      planId,
-      title,
-      periodStart: periodStart || undefined,
-      periodEnd: periodEnd || undefined,
-      nowState,
-      otherNotes: encodeOtherNotesMeta(otherNotes, shortGoalsComment, longGoalsComment),
-      reviewCount,
-      cycleType,
-      cycleLabel,
-      status: "completed",
-      reviewPoints: reviewPoints.map((point, index) => ({
-        id: point.id || `rp-${index + 1}`,
-        label: point.label,
-        dueDate: point.dueDate || undefined,
-        note: point.note,
-        completedAt: point.completedAt,
-        unlockedForEdit: point.unlockedForEdit,
-        skipped: point.skipped,
-        nowState: point.id === selectedReviewPointId ? nowState : point.nowState ?? "",
-        selfAssessment:
-          point.id === selectedReviewPointId
-            ? selfAssessment.map((entry) => ({ ...entry }))
-            : point.selfAssessment?.map((entry) => ({ ...entry })) ??
-              defaultAssessment(),
-      })),
-      selfAssessment: selfAssessment.map((entry) => ({
-        area: entry.area,
-        score: entry.score,
-        note: entry.note,
-        coachScore: entry.coachScore,
-      })),
-      shortGoals: shortGoals.filter(
-        (goal) => goal.title.trim() || goal.description.trim()
-      ),
-      longGoals: longGoals.filter(
-        (goal) => goal.title.trim() || goal.description.trim()
-      ),
-    });
-    setSaving(false);
-    if (!result.ok) {
-      setStatus(result.error);
-      return;
-    }
-    setPlanStatus("completed");
-    setStatus(messages.iup.markedComplete);
-  };
-  const onArchive = async () => {
-    if (!planId || !canManagePlan) {
-      return;
-    }
-    const ok = window.confirm(messages.iup.archiveConfirm);
-    if (!ok) {
-      return;
-    }
-    setSaving(true);
-    const result = await archiveIupPlan(planId);
-    setSaving(false);
-    if (!result.ok) {
-      setStatus(result.error);
-      return;
-    }
-    setPlanStatus("archived");
-    setStatus(messages.iup.archived);
-  };
-
-  const onDelete = async () => {
-    if (!planId || !canManagePlan) {
-      return;
-    }
-    const ok = window.confirm(messages.iup.deleteConfirm);
-    if (!ok) {
-      return;
-    }
-    setSaving(true);
-    const result = await deleteIupPlan(planId);
-    setSaving(false);
-    if (!result.ok) {
-      setStatus(result.error);
-      return;
-    }
-    router.push("/");
-  };
   const onSelectStep = (index: number) => {
     setStep(index);
     setStatus(null);
   };
-  const onSelectReviewPoint = (nextId: string) => {
-    if (!nextId || nextId === selectedReviewPointId) {
-      return;
-    }
-    persistCurrentReviewAnswers();
-    setSelectedReviewPointId(nextId);
-    setStatus(null);
-  };
-  const onCompleteReviewPoint = () => {
-    if (!canEditPlan || !activeReviewPoint || activeReviewPoint.skipped) {
-      return;
-    }
-    persistCurrentReviewAnswers(activeReviewPoint.id);
-    const nextIndex = reviewPoints.findIndex(
-      (point, index) =>
-        index > activeReviewPointIndex && !point.skipped && !point.completedAt
-    );
-    setReviewPoints((current) =>
-      current.map((point, index) => {
-        if (point.id === activeReviewPoint.id) {
-          return {
-            ...point,
-            completedAt: new Date().toISOString(),
-            unlockedForEdit: false,
-          };
-        }
-        if (nextIndex >= 0 && index === nextIndex && !point.dueDate) {
-          return {
-            ...point,
-            dueDate: suggestedReviewPeriod(
-              index,
-              current.length,
-              periodStart,
-              periodEnd,
-              reviewCadenceKind
-            ),
-          };
-        }
-        return point;
-      })
-    );
-    if (nextIndex >= 0 && nextIndex < reviewPoints.length) {
-      setSelectedReviewPointId(reviewPoints[nextIndex]?.id ?? selectedReviewPointId);
-      const suggested = suggestedReviewPeriod(
-        nextIndex,
-        reviewPoints.length,
-        periodStart,
-        periodEnd,
-        reviewCadenceKind
-      );
-      setStatus(
-        suggested
-          ? `${messages.iup.reviewMarkedDoneWithSuggestion} ${suggested}.`
-          : messages.iup.reviewMarkedDone
-      );
-      return;
-    }
-    setStatus(messages.iup.lastReviewDone);
-  };
-  const onUnlockReviewPoint = () => {
-    if (!canEditPlan || !activeReviewPoint) {
-      return;
-    }
-    setReviewPoints((current) =>
-      current.map((point) =>
-        point.id === activeReviewPoint.id ? { ...point, unlockedForEdit: true } : point
-      )
-    );
-    setStatus(messages.iup.reviewUnlocked);
-  };
-  const onToggleSkipReviewPoint = (pointId: string) => {
-    if (!canEditPlan) {
-      return;
-    }
-    setReviewPoints((current) =>
-      current.map((point) => {
-        if (point.id !== pointId) {
-          return point;
-        }
-        const nextSkipped = !point.skipped;
-        return {
-          ...point,
-          skipped: nextSkipped,
-          completedAt: nextSkipped ? undefined : point.completedAt,
-          unlockedForEdit: nextSkipped ? false : point.unlockedForEdit,
-        };
-      })
-    );
-    if (activeReviewPoint?.id === pointId && !activeReviewPoint.skipped) {
-      const nextOpen = reviewPoints.find(
-        (point) => point.id !== pointId && !point.skipped && !point.completedAt
-      );
-      if (nextOpen) {
-        setSelectedReviewPointId(nextOpen.id);
+
+  useEffect(() => {
+    const loadCheckins = async () => {
+      if (!planId || localDraftSource || !isSignedIn) {
+        setCheckins([]);
+        return;
       }
+      setCheckinsLoading(true);
+      const result = await fetchIupCheckins(planId);
+      setCheckinsLoading(false);
+      if (!result.ok) {
+        setStatus(result.error);
+        setCheckins([]);
+        return;
+      }
+      setCheckins(result.checkins);
+    };
+    void loadCheckins();
+  }, [isSignedIn, localDraftSource, planId]);
+
+  const onCreateCheckin = async () => {
+    const trimmed = checkinNote.trim();
+    if (!trimmed || !planId || !canCreateCheckin) {
+      return;
     }
+    setSaving(true);
+    const result = await createIupCheckin({
+      planId,
+      goalId: checkinGoalId || undefined,
+      reviewPointId: checkinReviewPointId || undefined,
+      note: trimmed,
+      rating: checkinRating ? Number(checkinRating) : undefined,
+      authorRole: isPlayerViewer ? "player" : "coach",
+    });
+    setSaving(false);
+    if (!result.ok) {
+      setStatus(result.error);
+      return;
+    }
+    const nextCheckins = await fetchIupCheckins(planId);
+    if (!nextCheckins.ok) {
+      setStatus(nextCheckins.error);
+      return;
+    }
+    setCheckins(nextCheckins.checkins);
+    setCheckinNote("");
+    setCheckinRating("");
+    setCheckinGoalId("");
+    setCheckinReviewPointId("");
+    setStatus(messages.iup.checkinSaved);
   };
-  const onChangeReviewPointPeriod = (pointId: string, value: string) => {
-    if (!canEditPlan) {
+
+  const onDeleteCheckin = async (checkinId: string) => {
+    setSaving(true);
+    const result = await deleteIupCheckin(checkinId);
+    setSaving(false);
+    if (!result.ok) {
+      setStatus(result.error);
       return;
     }
-    setReviewPoints((current) =>
-      current.map((point) => (point.id === pointId ? { ...point, dueDate: value } : point))
-    );
-  };
-  const onApplySuggestedReviewDate = (pointId: string, index: number) => {
-    if (!canEditPlan) {
-      return;
-    }
-    const suggestion = suggestedReviewPeriod(
-      index,
-      reviewPoints.length,
-      periodStart,
-      periodEnd,
-      reviewCadenceKind
-    );
-    if (!suggestion) {
-      return;
-    }
-    setReviewPoints((current) =>
-      current.map((point) =>
-        point.id === pointId ? { ...point, dueDate: suggestion } : point
-      )
-    );
+    setCheckins((current) => current.filter((entry) => entry.id !== checkinId));
+    setStatus(messages.iup.checkinDeleted);
   };
   return (
     <main className="app-shell iup-main">
@@ -1687,248 +408,45 @@ export default function IupPlanPage() {
       {error ? <p className="alert-error">{error}</p> : null}
       {!loading && !error && !canEditPlan ? (
         <p className="alert-warning">
-          {messages.iup.readOnlyAccess}
+          {isPlayerViewer ? messages.iup.readOnlyPlayerAccess : messages.iup.readOnlyAccess}
         </p>
       ) : null}
 
       {!loading && !error ? (
         <section className="card card-strong">
-          <div className="card iup-profile">
-            <div className="iup-avatar-wrap">
-              {canEditPlan ? (
-                <button
-                  type="button"
-                  className="iup-avatar iup-avatar-btn"
-                  onClick={() => setShowPhotoActions((current) => !current)}
-                  title={messages.iup.changeProfilePhoto}
-                  aria-label={messages.iup.changeProfilePhoto}
-                >
-                  {playerInfo?.photoUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={playerInfo.photoUrl} alt={playerInfo.name} />
-                  ) : (
-                    <span>{(playerInfo?.name ?? "P").slice(0, 1).toUpperCase()}</span>
-                  )}
-                </button>
-              ) : (
-                <div className="iup-avatar">
-                  {playerInfo?.photoUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={playerInfo.photoUrl} alt={playerInfo.name} />
-                  ) : (
-                    <span>{(playerInfo?.name ?? "P").slice(0, 1).toUpperCase()}</span>
-                  )}
-                </div>
-              )}
-              {canEditPlan ? (
-                <>
-                  <input
-                    ref={filePickerRef}
-                    type="file"
-                    accept="image/*"
-                    hidden
-                    onChange={onSelectPhotoFile}
-                  />
-                  <input
-                    ref={cameraPickerRef}
-                    type="file"
-                    accept="image/*"
-                    capture="environment"
-                    hidden
-                    onChange={onSelectPhotoFile}
-                  />
-                  <span className="muted-sm iup-avatar-help">{messages.iup.clickToChangePhoto}</span>
-                  {showPhotoActions ? (
-                    <div className="card iup-photo-menu">
-                      <button type="button" onClick={() => filePickerRef.current?.click()}>
-                        {messages.iup.chooseFromDevice}
-                      </button>
-                      <button type="button" onClick={() => cameraPickerRef.current?.click()}>
-                        {messages.iup.imagesOrCamera}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setShowPhotoLinkInput((current) => !current)}
-                      >
-                        {messages.iup.useLink}
-                      </button>
-                      {playerInfo?.photoUrl ? (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            applyPlayerPhotoUrl("");
-                            setShowPhotoActions(false);
-                            setShowPhotoLinkInput(false);
-                          }}
-                        >
-                          {messages.iup.removeImage}
-                        </button>
-                      ) : null}
-                      {showPhotoLinkInput ? (
-                        <div className="iup-photo-link">
-                          <input
-                            value={photoLinkDraft}
-                            onChange={(event) => setPhotoLinkDraft(event.target.value)}
-                            placeholder="https://..."
-                          />
-                          <button type="button" onClick={onApplyPhotoLink}>
-                            {messages.iup.saveLink}
-                          </button>
-                        </div>
-                      ) : null}
-                    </div>
-                  ) : null}
-                </>
-              ) : null}
-            </div>
-            <div className="iup-profile-content">
-              <div className="iup-profile-main">
-                <strong className="iup-player-name">{playerInfo?.name ?? messages.iup.playerFallback}</strong>
-                <div className="iup-profile-groups">
-                  <div className="iup-profile-group">
-                    <span className="iup-profile-group-title">{messages.iup.baseData}</span>
-                    <div className="cluster">
-                      <span className="pill">{playerInfo?.teamName ?? messages.iup.teamMissing}</span>
-                      {playerInfo?.positionLabel ? (
-                        <span className="pill">{playerInfo.positionLabel}</span>
-                      ) : null}
-                      {typeof playerInfo?.number === "number" ? (
-                        <span className="pill">#{playerInfo.number}</span>
-                      ) : null}
-                      {playerInfo?.birthDate ? (
-                        <span className="pill">{messages.iup.born}: {playerInfo.birthDate}</span>
-                      ) : null}
-                      {playerInfo?.birthDate ? (
-                        <span className="pill">{messages.iup.age}: {getAge(playerInfo.birthDate)}</span>
-                      ) : null}
-                    </div>
-                  </div>
-                  <div className="iup-profile-group">
-                    <span className="iup-profile-group-title">{messages.iup.physics}</span>
-                    <div className="cluster">
-                      {playerInfo?.dominantFoot ? (
-                        <span className="pill">{messages.iup.foot}: {playerInfo.dominantFoot}</span>
-                      ) : null}
-                      {playerInfo?.heightCm ? (
-                        <span className="pill">{playerInfo.heightCm} cm</span>
-                      ) : null}
-                      {playerInfo?.weightKg ? (
-                        <span className="pill">{playerInfo.weightKg} kg</span>
-                      ) : null}
-                      {playerInfo?.heightCm && playerInfo?.weightKg ? (
-                        <span className="pill">BMI: {getBmi(playerInfo.heightCm, playerInfo.weightKg)}</span>
-                      ) : null}
-                    </div>
-                  </div>
-                  <div className="iup-profile-group">
-                    <span className="iup-profile-group-title">{messages.iup.background}</span>
-                    <div className="cluster">
-                      {playerInfo?.birthDate ? (
-                        <span className="pill">{messages.iup.birthYear}: {getBirthYear(playerInfo.birthDate)}</span>
-                      ) : null}
-                      {playerInfo?.nationality ? (
-                        <span className="pill">Nationalitet: {playerInfo.nationality}</span>
-                      ) : null}
-                      {playerInfo?.birthPlace ? (
-                        <span className="pill">Födelseort: {playerInfo.birthPlace}</span>
-                      ) : null}
-                    </div>
-                  </div>
-                </div>
-                {playerInfo?.injuryNotes ? (
-                  <p className="iup-note">
-                    <strong>{messages.iup.medicalNote}:</strong> {playerInfo.injuryNotes}
-                  </p>
-                ) : null}
-              </div>
-
-              <div className="iup-profile-aside">
-                {canManagePlan ? (
-                  <div className="iup-actions">
-                    {canEditPlan && activeReviewPoint && !activeReviewPoint.completedAt ? (
-                      <button
-                        type="button"
-                        onClick={onCompleteReviewPoint}
-                        disabled={saving}
-                        title={messages.iup.markReviewDone}
-                        aria-label={messages.iup.markReviewDone}
-                        className="icon-btn"
-                      >
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
-                          <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.5" />
-                          <path d="M7.5 12.5 10.5 15.5 16.5 9.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-                        </svg>
-                      </button>
-                    ) : null}
-                    <button
-                      type="button"
-                      onClick={onArchive}
-                      disabled={saving || planStatus === "archived"}
-                      title={messages.iup.archive}
-                      aria-label={messages.iup.archive}
-                      className="icon-btn"
-                    >
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
-                        <path d="M4 7h16v3H4V7Zm2 3h12v9a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1v-9Zm4-6h4l1 2H9l1-2Z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
-                      </svg>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={onDelete}
-                      disabled={saving}
-                      title={messages.iup.delete}
-                      aria-label={messages.iup.delete}
-                      className="icon-btn"
-                    >
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
-                        <path d="M8 8l8 8M16 8l-8 8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-                        <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.4" />
-                      </svg>
-                    </button>
-                  </div>
-                ) : null}
-                <div className="iup-title-row">
-                  <select
-                    value={selectedReviewPointId}
-                    onChange={(event) => onSelectReviewPoint(event.target.value)}
-                    className="input-medium"
-                  >
-                    {reviewPoints.map((point, index) => (
-                      <option key={point.id} value={point.id}>
-                        {(point.label || `${messages.iup.sessionPrefix} ${index + 1}`) +
-                          (point.dueDate ? ` • ${point.dueDate}` : "") +
-                          (point.skipped ? ` • ${messages.iup.reviewSkipped}` : "") +
-                          (point.completedAt ? ` • ${messages.iup.reviewDone}` : "")}
-                      </option>
-                    ))}
-                  </select>
-                  {canManagePlan ? (
-                    null
-                  ) : null}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {((canEditPlan && activeReviewPoint?.completedAt && !activeReviewPointEditable) ||
-            !activeReviewPointEditable) ? (
-            <div className="iup-header-form">
-              {canEditPlan && activeReviewPoint?.completedAt && !activeReviewPointEditable ? (
-                <div className="toolbar">
-                  <button type="button" onClick={onUnlockReviewPoint}>
-                    {messages.iup.unlockForEditing}
-                  </button>
-                </div>
-              ) : null}
-              {!activeReviewPointEditable ? (
-                <p className="alert-warning">
-                  {activeReviewPoint?.skipped
-                    ? messages.iup.skippedReadOnly
-                    : messages.iup.completedReadOnly}
-                </p>
-              ) : null}
-            </div>
-          ) : null}
+          <IupHeader
+            messages={messages}
+            playerInfo={playerInfo}
+            canEditPlan={canEditPlan}
+            canManagePlan={canManagePlan}
+            saving={saving}
+            planStatus={planStatus}
+            activeReviewPoint={activeReviewPoint}
+            activeReviewPointEditable={activeReviewPointEditable}
+            selectedReviewPointId={selectedReviewPointId}
+            reviewPoints={reviewPoints}
+            reviewCadenceKind={reviewCadenceKind}
+            reviewCadenceConfig={reviewCadenceConfig}
+            showPhotoActions={showPhotoActions}
+            showPhotoLinkInput={showPhotoLinkInput}
+            photoLinkDraft={photoLinkDraft}
+            filePickerRef={filePickerRef}
+            cameraPickerRef={cameraPickerRef}
+            onSelectPhotoFile={onSelectPhotoFile}
+            onTogglePhotoActions={() => setShowPhotoActions((current) => !current)}
+            onTogglePhotoLinkInput={() => setShowPhotoLinkInput((current) => !current)}
+            onPhotoLinkDraftChange={setPhotoLinkDraft}
+            onApplyPhotoLink={onApplyPhotoLink}
+            onRemovePhoto={onRemovePhoto}
+            onCompleteReviewPoint={() => onCompleteReviewPoint(setStatus)}
+            onArchive={onArchive}
+            onDelete={onDelete}
+            onSelectReviewPoint={(value) => {
+              onSelectReviewPoint(value);
+              setStatus(null);
+            }}
+            onUnlockReviewPoint={() => onUnlockReviewPoint(setStatus)}
+          />
 
           <div className="card step-shell">
             <div aria-hidden className="step-track">
@@ -1962,622 +480,136 @@ export default function IupPlanPage() {
           </div>
 
           <fieldset
-            disabled={!canEditPlan || saving || (step !== 4 && step !== 0 && !activeReviewPointEditable)}
+            disabled={!canEditCurrentStep || saving || (step !== 4 && step !== 0 && !activeReviewPointEditable)}
             className="step-fieldset"
           >
             {step === 0 ? (
-              <>
-                <h3 className="section-h3">{messages.iup.playerProfile}</h3>
-                <div className="iup-profile-editor">
-                  <div className="card form-stack iup-profile-section">
-                    <strong className="iup-profile-group-title">{messages.iup.baseData}</strong>
-                    <div className="row wrap">
-                      <input
-                        value={playerInfo?.name ?? ""}
-                        onChange={(event) =>
-                          setPlayerInfo((current) =>
-                            current ? { ...current, name: event.target.value } : current
-                          )
-                        }
-                        placeholder={messages.squad.name}
-                      />
-                      <input
-                        value={typeof playerInfo?.number === "number" ? String(playerInfo.number) : ""}
-                        onChange={(event) =>
-                          setPlayerInfo((current) =>
-                            current
-                              ? {
-                                  ...current,
-                                  number: event.target.value.trim()
-                                    ? Number(event.target.value)
-                                    : undefined,
-                                }
-                              : current
-                          )
-                        }
-                        placeholder={messages.home.number}
-                        className="input-short"
-                      />
-                      <input
-                        value={playerInfo?.positionLabel ?? ""}
-                        onChange={(event) =>
-                          setPlayerInfo((current) =>
-                            current ? { ...current, positionLabel: event.target.value } : current
-                          )
-                        }
-                        placeholder={messages.iup.favoritePosition}
-                      />
-                      <input
-                        type="date"
-                        value={playerInfo?.birthDate ?? ""}
-                        onChange={(event) =>
-                          setPlayerInfo((current) =>
-                            current ? { ...current, birthDate: event.target.value } : current
-                          )
-                        }
-                      />
-                    </div>
-                  </div>
-
-                  <div className="card form-stack iup-profile-section">
-                    <strong className="iup-profile-group-title">{messages.iup.physics}</strong>
-                    <div className="row wrap">
-                      <input
-                        value={playerInfo?.dominantFoot ?? ""}
-                        onChange={(event) =>
-                          setPlayerInfo((current) =>
-                            current ? { ...current, dominantFoot: event.target.value } : current
-                          )
-                        }
-                        placeholder={messages.squad.dominantFoot}
-                      />
-                      <input
-                        value={typeof playerInfo?.heightCm === "number" ? String(playerInfo.heightCm) : ""}
-                        onChange={(event) =>
-                          setPlayerInfo((current) =>
-                            current
-                              ? {
-                                  ...current,
-                                  heightCm: event.target.value.trim()
-                                    ? Number(event.target.value)
-                                    : undefined,
-                                }
-                              : current
-                          )
-                        }
-                        placeholder={messages.squad.heightCm}
-                        className="input-short"
-                      />
-                      <input
-                        value={typeof playerInfo?.weightKg === "number" ? String(playerInfo.weightKg) : ""}
-                        onChange={(event) =>
-                          setPlayerInfo((current) =>
-                            current
-                              ? {
-                                  ...current,
-                                  weightKg: event.target.value.trim()
-                                    ? Number(event.target.value)
-                                    : undefined,
-                                }
-                              : current
-                          )
-                        }
-                        placeholder={messages.squad.weightKg}
-                        className="input-short"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="card form-stack iup-profile-section">
-                    <strong className="iup-profile-group-title">{messages.iup.background}</strong>
-                    <div className="row wrap">
-                      <input
-                        value={playerInfo?.nationality ?? ""}
-                        onChange={(event) =>
-                          setPlayerInfo((current) =>
-                            current ? { ...current, nationality: event.target.value } : current
-                          )
-                        }
-                        placeholder={messages.squad.nationality}
-                      />
-                      <input
-                        value={playerInfo?.birthPlace ?? ""}
-                        onChange={(event) =>
-                          setPlayerInfo((current) =>
-                            current ? { ...current, birthPlace: event.target.value } : current
-                          )
-                        }
-                        placeholder={messages.squad.birthPlace}
-                      />
-                    </div>
-                    <p className="iup-note">
-                      {messages.iup.photoHint}
-                    </p>
-                  </div>
-
-                  <div className="card form-stack iup-profile-section">
-                    <strong className="iup-profile-group-title">{messages.iup.medicalInfo}</strong>
-                    <textarea
-                      value={playerInfo?.injuryNotes ?? ""}
-                      onChange={(event) =>
-                        setPlayerInfo((current) =>
-                          current ? { ...current, injuryNotes: event.target.value } : current
-                        )
-                      }
-                      placeholder={messages.squad.injuryNotes}
-                      className="text-area-md"
-                    />
-                  </div>
-                </div>
-              </>
+              <PlayerProfileStep
+                messages={messages}
+                playerInfo={playerInfo}
+                onPlayerInfoChange={(updater) =>
+                  setPlayerInfo((current) => (current ? updater(current) : current))
+                }
+              />
             ) : null}
 
             {step === 1 ? (
-              <>
-                <h3 className="section-h3">{messages.iup.currentState}</h3>
-                <div className="form-stack">
-                  <strong>{messages.iup.selfAssessment}</strong>
-                  <div className="assessment-grid">
-                    {selfAssessment.map((item, index) => (
-                      <div key={`${item.area}-${index}`} className="card assessment-card">
-                        <div className="assessment-top">
-                          <strong>{assessmentAreas[index] ?? item.area}</strong>
-                          <div className="assessment-scores">
-                            <label className="assessment-score-field">
-                              <span className="assessment-score-label">{messages.iup.player}</span>
-                              <select
-                                value={String(item.score)}
-                                onChange={(event) =>
-                                  updateAssessment(
-                                    index,
-                                    "score",
-                                    Number(event.target.value) || 3
-                                  )
-                                }
-                                className="input-short assessment-score-select"
-                              >
-                                <option value="1">1</option>
-                                <option value="2">2</option>
-                                <option value="3">3</option>
-                                <option value="4">4</option>
-                                <option value="5">5</option>
-                              </select>
-                            </label>
-                            {isSignedIn && showCoachAssessment ? (
-                              <label className="assessment-score-field">
-                                <span className="assessment-score-label">{messages.iup.coach}</span>
-                                <select
-                                  value={String(item.coachScore ?? 3)}
-                                  onChange={(event) =>
-                                    updateAssessment(
-                                      index,
-                                      "coachScore",
-                                      Number(event.target.value) || 3
-                                    )
-                                  }
-                                  className="input-short assessment-score-select"
-                                >
-                                  <option value="1">1</option>
-                                  <option value="2">2</option>
-                                  <option value="3">3</option>
-                                  <option value="4">4</option>
-                                  <option value="5">5</option>
-                                </select>
-                              </label>
-                            ) : null}
-                          </div>
-                        </div>
-                        <textarea
-                          value={item.note}
-                          onChange={(event) =>
-                            updateAssessment(index, "note", event.target.value)
-                          }
-                          placeholder={messages.home.notesPlaceholder}
-                          className="text-area-sm"
-                        />
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                <textarea
-                  value={nowState}
-                  onChange={(event) => setNowState(event.target.value)}
-                  placeholder={messages.iup.currentState}
-                  className="text-area-md"
-                />
-              </>
+              <CurrentStateStep
+                messages={messages}
+                selfAssessment={selfAssessment}
+                nowState={nowState}
+                isSignedIn={isSignedIn}
+                showCoachAssessment={showCoachAssessment && canManagePlan}
+                canEdit={canEditPlan || canPlayerSelfAssess}
+                onUpdateAssessment={updateAssessment}
+                onNowStateChange={setNowState}
+              />
             ) : null}
 
             {step === 2 ? (
-              <>
-                <h3 className="section-h3">{messages.iup.shortGoals}</h3>
-                <div className="card form-stack">
-                  <div className="toolbar">
-                    <label className="muted">{messages.iup.suggestionsByPosition}</label>
-                    <select
-                      value={shortSuggestionFilter}
-                      onChange={(event) =>
-                        setShortSuggestionFilter(event.target.value as PositionGroup)
-                      }
-                      className="input-medium"
-                    >
-                      <option value="all">{messages.iup.all}</option>
-                      <option value="gk">{messages.iup.goalkeeper}</option>
-                      <option value="def">{messages.iup.defender}</option>
-                      <option value="mid">{messages.iup.midfielder}</option>
-                      <option value="fwd">{messages.iup.forward}</option>
-                    </select>
-                  </div>
-                  <div className="goal-groups">
-                    {groupedShortSuggestions.map((group) => (
-                      <div key={`short-group-${group.category}`} className="goal-group">
-                        <strong className="goal-group-label">
-                          {getSuggestionCategoryLabel(group.category, messages)}
-                        </strong>
-                        <div className="toolbar">
-                          {group.suggestions.map((suggestion) => (
-                            (() => {
-                              const suggestionKey = `short-${group.category}-${suggestion.title}`;
-                              const isExpanded = expandedShortSuggestions.includes(suggestionKey);
-                              return (
-                                <div
-                                  key={suggestionKey}
-                                  className={`goal-suggestion-wrap${isExpanded ? " expanded" : ""}`}
-                                >
-                                  <button
-                                    type="button"
-                                    onClick={() => applySuggestion(setShortGoals, suggestion)}
-                                    className={`goal-suggestion${isGoalSelected(shortGoals, suggestion) ? " selected" : ""}`}
-                                  >
-                                    <span className="goal-suggestion-text">{suggestion.title}</span>
-                                    <span
-                                      className={`goal-suggestion-chevron${isExpanded ? " expanded" : ""}`}
-                                      onClick={(event) => {
-                                        event.preventDefault();
-                                        event.stopPropagation();
-                                        toggleExpandedSuggestion(
-                                          setExpandedShortSuggestions,
-                                          suggestionKey
-                                        );
-                                      }}
-                                      role="button"
-                                      aria-label={isExpanded ? messages.iup.hideExplanation : messages.iup.showExplanation}
-                                      tabIndex={0}
-                                      onKeyDown={(event) => {
-                                        if (event.key === "Enter" || event.key === " ") {
-                                          event.preventDefault();
-                                          event.stopPropagation();
-                                          toggleExpandedSuggestion(
-                                            setExpandedShortSuggestions,
-                                            suggestionKey
-                                          );
-                                        }
-                                      }}
-                                    >
-                                      <svg
-                                        width="12"
-                                        height="12"
-                                        viewBox="0 0 12 12"
-                                        fill="none"
-                                        xmlns="http://www.w3.org/2000/svg"
-                                        aria-hidden
-                                      >
-                                        <path
-                                          d="M4 2.5 7.5 6 4 9.5"
-                                          stroke="currentColor"
-                                          strokeWidth="1.5"
-                                          strokeLinecap="round"
-                                          strokeLinejoin="round"
-                                        />
-                                      </svg>
-                                    </span>
-                                  </button>
-                                  {isExpanded ? (
-                                    <div className="goal-suggestion-description">
-                                      {suggestion.description}
-                                    </div>
-                                  ) : null}
-                                </div>
-                              );
-                            })()
-                          ))}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="goal-custom-add">
-                    <label className="goal-custom-label">{messages.iup.ownGoal}</label>
-                    <div className="toolbar">
-                      <input
-                        value={shortCustomGoal}
-                        onChange={(event) => setShortCustomGoal(event.target.value)}
-                        placeholder={messages.iup.addOwnGoal}
-                        className="input-wide"
-                      />
-                      <button
-                        type="button"
-                        onClick={() =>
-                          addCustomGoal(setShortGoals, shortCustomGoal, () =>
-                            setShortCustomGoal("")
-                          )
-                        }
-                      >
-                        {messages.iup.add}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-                <div className="goal-list">
-                  <strong className="goal-selected-title">{messages.iup.selectedGoals}</strong>
-                  {shortGoals.length === 0 ? (
-                    <p className="muted-line">{messages.iup.noGoalsSelected}</p>
-                  ) : shortGoals.map((goal, index) => (
-                    <div key={`short-${index}`} className="goal-item">
-                      <span className="goal-selected-dot" aria-hidden>
-                        ✓
-                      </span>
-                      <span>{goal.title || messages.iup.goalFallback}</span>
-                      <button
-                        type="button"
-                        className="goal-remove"
-                        onClick={() => removeGoal(setShortGoals, index)}
-                        aria-label={`${messages.iup.removeGoal} ${index + 1}`}
-                        title={messages.iup.removeGoal}
-                      >
-                        x
-                      </button>
-                    </div>
-                  ))}
-                </div>
-                <div className="form-stack">
-                  <label className="muted">{messages.iup.shortComment}</label>
-                  <textarea
-                    value={shortGoalsComment}
-                    onChange={(event) => setShortGoalsComment(event.target.value)}
-                    placeholder={messages.iup.shortGoalsPlaceholder}
-                    className="text-area-sm"
-                  />
-                </div>
-              </>
+              <GoalsStep
+                messages={messages}
+                title={messages.iup.shortGoals}
+                commentLabel={messages.iup.shortComment}
+                commentPlaceholder={messages.iup.shortGoalsPlaceholder}
+                filterValue={shortSuggestionFilter}
+                groupedSuggestions={groupedShortSuggestions}
+                goals={shortGoals}
+                customGoal={shortCustomGoal}
+                expandedSuggestions={expandedShortSuggestions}
+                commentValue={shortGoalsComment}
+                onFilterChange={setShortSuggestionFilter}
+                onApplySuggestion={(suggestion) =>
+                  applySuggestion(setShortGoals, suggestion)
+                }
+                isGoalSelected={(suggestion) => isGoalSelected(shortGoals, suggestion)}
+                onToggleExpandedSuggestion={(key) =>
+                  toggleExpandedSuggestion(setExpandedShortSuggestions, key)
+                }
+                onCustomGoalChange={setShortCustomGoal}
+                onAddCustomGoal={() =>
+                  addCustomGoal(setShortGoals, shortCustomGoal, () => setShortCustomGoal(""))
+                }
+                onRemoveGoal={(index) => removeGoal(setShortGoals, index)}
+                onCommentChange={setShortGoalsComment}
+                suggestionKeyPrefix="short"
+              />
             ) : null}
 
             {step === 3 ? (
-              <>
-                <h3 className="section-h3">{messages.iup.longGoals}</h3>
-                <div className="card form-stack">
-                  <div className="toolbar">
-                    <label className="muted">{messages.iup.suggestionsByPosition}</label>
-                    <select
-                      value={longSuggestionFilter}
-                      onChange={(event) =>
-                        setLongSuggestionFilter(event.target.value as PositionGroup)
-                      }
-                      className="input-medium"
-                    >
-                      <option value="all">{messages.iup.all}</option>
-                      <option value="gk">{messages.iup.goalkeeper}</option>
-                      <option value="def">{messages.iup.defender}</option>
-                      <option value="mid">{messages.iup.midfielder}</option>
-                      <option value="fwd">{messages.iup.forward}</option>
-                    </select>
-                  </div>
-                  <div className="goal-groups">
-                    {groupedLongSuggestions.map((group) => (
-                      <div key={`long-group-${group.category}`} className="goal-group">
-                        <strong className="goal-group-label">
-                          {getSuggestionCategoryLabel(group.category, messages)}
-                        </strong>
-                        <div className="toolbar">
-                          {group.suggestions.map((suggestion) => (
-                            (() => {
-                              const suggestionKey = `long-${group.category}-${suggestion.title}`;
-                              const isExpanded = expandedLongSuggestions.includes(suggestionKey);
-                              return (
-                                <div
-                                  key={suggestionKey}
-                                  className={`goal-suggestion-wrap${isExpanded ? " expanded" : ""}`}
-                                >
-                                  <button
-                                    type="button"
-                                    onClick={() => applySuggestion(setLongGoals, suggestion)}
-                                    className={`goal-suggestion${isGoalSelected(longGoals, suggestion) ? " selected" : ""}`}
-                                  >
-                                    <span className="goal-suggestion-text">{suggestion.title}</span>
-                                    <span
-                                      className={`goal-suggestion-chevron${isExpanded ? " expanded" : ""}`}
-                                      onClick={(event) => {
-                                        event.preventDefault();
-                                        event.stopPropagation();
-                                        toggleExpandedSuggestion(
-                                          setExpandedLongSuggestions,
-                                          suggestionKey
-                                        );
-                                      }}
-                                      role="button"
-                                      aria-label={isExpanded ? messages.iup.hideExplanation : messages.iup.showExplanation}
-                                      tabIndex={0}
-                                      onKeyDown={(event) => {
-                                        if (event.key === "Enter" || event.key === " ") {
-                                          event.preventDefault();
-                                          event.stopPropagation();
-                                          toggleExpandedSuggestion(
-                                            setExpandedLongSuggestions,
-                                            suggestionKey
-                                          );
-                                        }
-                                      }}
-                                    >
-                                      <svg
-                                        width="12"
-                                        height="12"
-                                        viewBox="0 0 12 12"
-                                        fill="none"
-                                        xmlns="http://www.w3.org/2000/svg"
-                                        aria-hidden
-                                      >
-                                        <path
-                                          d="M4 2.5 7.5 6 4 9.5"
-                                          stroke="currentColor"
-                                          strokeWidth="1.5"
-                                          strokeLinecap="round"
-                                          strokeLinejoin="round"
-                                        />
-                                      </svg>
-                                    </span>
-                                  </button>
-                                  {isExpanded ? (
-                                    <div className="goal-suggestion-description">
-                                      {suggestion.description}
-                                    </div>
-                                  ) : null}
-                                </div>
-                              );
-                            })()
-                          ))}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="goal-custom-add">
-                    <label className="goal-custom-label">{messages.iup.ownGoal}</label>
-                    <div className="toolbar">
-                      <input
-                        value={longCustomGoal}
-                        onChange={(event) => setLongCustomGoal(event.target.value)}
-                        placeholder={messages.iup.addOwnGoal}
-                        className="input-wide"
-                      />
-                      <button
-                        type="button"
-                        onClick={() =>
-                          addCustomGoal(setLongGoals, longCustomGoal, () =>
-                            setLongCustomGoal("")
-                          )
-                        }
-                      >
-                        {messages.iup.add}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-                <div className="goal-list">
-                  <strong className="goal-selected-title">{messages.iup.selectedGoals}</strong>
-                  {longGoals.length === 0 ? (
-                    <p className="muted-line">{messages.iup.noGoalsSelected}</p>
-                  ) : longGoals.map((goal, index) => (
-                    <div key={`long-${index}`} className="goal-item">
-                      <span className="goal-selected-dot" aria-hidden>
-                        ✓
-                      </span>
-                      <span>{goal.title || messages.iup.goalFallback}</span>
-                      <button
-                        type="button"
-                        className="goal-remove"
-                        onClick={() => removeGoal(setLongGoals, index)}
-                        aria-label={`${messages.iup.removeGoal} ${index + 1}`}
-                        title={messages.iup.removeGoal}
-                      >
-                        x
-                      </button>
-                    </div>
-                  ))}
-                </div>
-                <div className="form-stack">
-                  <label className="muted">{messages.iup.longComment}</label>
-                  <textarea
-                    value={longGoalsComment}
-                    onChange={(event) => setLongGoalsComment(event.target.value)}
-                    placeholder={messages.iup.longGoalsPlaceholder}
-                    className="text-area-sm"
-                  />
-                </div>
-              </>
+              <GoalsStep
+                messages={messages}
+                title={messages.iup.longGoals}
+                commentLabel={messages.iup.longComment}
+                commentPlaceholder={messages.iup.longGoalsPlaceholder}
+                filterValue={longSuggestionFilter}
+                groupedSuggestions={groupedLongSuggestions}
+                goals={longGoals}
+                customGoal={longCustomGoal}
+                expandedSuggestions={expandedLongSuggestions}
+                commentValue={longGoalsComment}
+                onFilterChange={setLongSuggestionFilter}
+                onApplySuggestion={(suggestion) =>
+                  applySuggestion(setLongGoals, suggestion)
+                }
+                isGoalSelected={(suggestion) => isGoalSelected(longGoals, suggestion)}
+                onToggleExpandedSuggestion={(key) =>
+                  toggleExpandedSuggestion(setExpandedLongSuggestions, key)
+                }
+                onCustomGoalChange={setLongCustomGoal}
+                onAddCustomGoal={() =>
+                  addCustomGoal(setLongGoals, longCustomGoal, () => setLongCustomGoal(""))
+                }
+                onRemoveGoal={(index) => removeGoal(setLongGoals, index)}
+                onCommentChange={setLongGoalsComment}
+                suggestionKeyPrefix="long"
+              />
             ) : null}
 
             {step === 4 ? (
-              <>
-                <h3 className="section-h3">{messages.iup.summary}</h3>
-                <div className="card form-stack">
-                  <span>
-                    <strong>{messages.iup.periodType}:</strong> {cycleType === "season" ? messages.iup.season : messages.iup.calendarYear}
-                  </span>
-                  <span>
-                    <strong>{cycleType === "season" ? messages.iup.season : messages.iup.year}:</strong> {cycleLabel || "-"}
-                  </span>
-                  <span>
-                    <strong>{messages.iup.start}:</strong> {periodStart || "-"}
-                  </span>
-                  <span>
-                    <strong>{messages.iup.end}:</strong> {periodEnd || "-"}
-                  </span>
-                  <span>
-                    <strong>{messages.iup.reviews}:</strong> {reviewCadenceLabel}
-                  </span>
-                  <span>
-                    <strong>{messages.iup.other}:</strong> {otherNotes || "-"}
-                  </span>
-                  <span>
-                    <strong>{messages.iup.shortGoalsCommentLabel}:</strong> {shortGoalsComment || "-"}
-                  </span>
-                  <span>
-                    <strong>{messages.iup.longGoalsCommentLabel}:</strong> {longGoalsComment || "-"}
-                  </span>
-                </div>
-                <p className="muted-line">
-                  {messages.iup.summaryInfo}
-                </p>
-                <div className="card form-stack">
-                  <strong>{messages.iup.reviewPlan}</strong>
-                  {reviewPoints.map((point, index) => {
-                    const suggestion = suggestedReviewPeriod(
-                      index,
-                      reviewPoints.length,
-                      periodStart,
-                      periodEnd,
-                      reviewCadenceKind
-                    );
-                    return (
-                      <div key={point.id} className="row row-between wrap">
-                        <span>
-                          <strong>{point.label || `${messages.iup.sessionPrefix} ${index + 1}`}</strong>
-                          {point.skipped ? ` • ${messages.iup.reviewSkipped}` : ""}
-                          {point.completedAt ? ` • ${messages.iup.reviewDone}` : ""}
-                        </span>
-                        <div className="toolbar">
-                          <input
-                            value={point.dueDate || ""}
-                            onChange={(event) =>
-                              onChangeReviewPointPeriod(point.id, event.target.value)
-                            }
-                            disabled={!canEditPlan || !!point.completedAt || !!point.skipped}
-                            placeholder={suggestion || messages.iup.customPeriod}
-                            className="input-medium"
-                          />
-                          {canEditPlan && !point.completedAt && !point.skipped && suggestion && point.dueDate !== suggestion ? (
-                            <button
-                              type="button"
-                              onClick={() => onApplySuggestedReviewDate(point.id, index)}
-                            >
-                              {messages.iup.useSuggestionAction}
-                            </button>
-                          ) : null}
-                          {canEditPlan ? (
-                            <button
-                              type="button"
-                              onClick={() => onToggleSkipReviewPoint(point.id)}
-                            >
-                              {point.skipped ? messages.iup.reset : messages.iup.skip}
-                            </button>
-                          ) : null}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </>
+              <SummaryStep
+                messages={messages}
+                cycleType={cycleType}
+                cycleLabel={cycleLabel}
+                periodStart={periodStart}
+                periodEnd={periodEnd}
+                reviewCadenceLabel={reviewCadenceLabel}
+                otherNotes={otherNotes}
+                shortGoalsComment={shortGoalsComment}
+                longGoalsComment={longGoalsComment}
+                reviewPoints={reviewPoints}
+                reviewCadenceKind={reviewCadenceKind}
+                reviewCadenceConfig={reviewCadenceConfig}
+                canEditPlan={canEditPlan}
+                onChangeReviewPointPeriod={onChangeReviewPointPeriod}
+                onApplySuggestedReviewDate={onApplySuggestedReviewDate}
+                onToggleSkipReviewPoint={onToggleSkipReviewPoint}
+              />
             ) : null}
           </fieldset>
         </section>
+      ) : null}
+
+      {!loading && !error && !localDraftSource ? (
+        <CheckinsSection
+          messages={messages}
+          checkins={checkins}
+          loading={checkinsLoading}
+          canCreate={canCreateCheckin}
+          goalOptions={checkinGoalOptions}
+          reviewPoints={reviewPoints}
+          draftNote={checkinNote}
+          draftRating={checkinRating}
+          draftGoalId={checkinGoalId}
+          draftReviewPointId={checkinReviewPointId}
+          currentUserId={signedInUserId}
+          onDraftNoteChange={setCheckinNote}
+          onDraftRatingChange={setCheckinRating}
+          onDraftGoalIdChange={setCheckinGoalId}
+          onDraftReviewPointIdChange={setCheckinReviewPointId}
+          onCreate={onCreateCheckin}
+          onDelete={onDeleteCheckin}
+        />
       ) : null}
 
       {status ? <p className="status-line">{status}</p> : null}
@@ -2601,21 +633,28 @@ export default function IupPlanPage() {
                     return;
                   }
                   if (step === 4) {
+                    if (!canEditPlan) {
+                      return;
+                    }
                     onComplete();
                     return;
                   }
                   setStep((current) => Math.min(4, current + 1));
                   setStatus(null);
                 }}
-                disabled={saving || !!error}
+                disabled={saving || !!error || (step === 4 && !canEditPlan)}
               >
                 {step === 4 ? messages.iup.complete : `${messages.iup.next}${nextStepLabel ? `: ${nextStepLabel}` : ""}`}
               </button>
-              <button className="primary" onClick={onSave} disabled={!canSave || !canEditPlan || !!error}>
+              <button className="primary" onClick={onSave} disabled={!canSave || (!canEditPlan && !canPlayerSelfAssess) || !!error}>
                 {saving
                   ? messages.iup.saving
                   : !canEditPlan
-                    ? messages.iup.roleReadOnly
+                    ? canPlayerSelfAssess
+                      ? messages.iup.saveSelfAssessment
+                      : isPlayerViewer
+                        ? messages.iup.rolePlayerView
+                        : messages.iup.roleReadOnly
                     : localDraftSource
                       ? messages.iup.saveLocal
                       : messages.iup.saveIup}

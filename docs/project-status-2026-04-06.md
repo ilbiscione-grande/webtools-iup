@@ -83,6 +83,21 @@ Rekommendation:
 - överväg att rensa `.next` före build i CI om problemet återkommer
 - verifiera build i en ren miljö
 
+Status 2026-04-08:
+
+- CI-skriptet använder nu unik buildkatalog per körning i stället för delad `.next`
+- CI-builden använder temporär `tsconfig` så att vanlig `tsconfig.json` inte skrivs om av Next
+- problemet kvarstår ändå i lokal Windows-miljö och har nu smalnats av till Next-builden själv:
+  - Turbopack: `EPERM` vid rename/unlink i build-output
+  - webpack: `spawn EPERM`
+  - webpack + worker threads: `DataCloneError`
+
+Bedömning:
+
+- felet ser nu mer ut som Next.js 16 + lokal Windows-miljö/filsystem/processhantering än som appspecifik kodbugg
+- `typecheck` är fortfarande grön
+- kärnrisken ligger i att kvalitetsgrinden inte kan verifieras konsekvent lokalt
+
 ### 3. Åtkomstmodell fastslagen för v1
 
 IUP-flödet för coach/admin är nu definierat som admin-scope.
@@ -106,9 +121,9 @@ Konsekvens:
 
 ## Viktiga kvalitetsbrister
 
-### 1. För stor logik i en enskild sida
+### 1. IUP-editorn var tidigare den största komplexitetsytan
 
-`src/app/iup/[id]/page.tsx` är cirka 2030 rader och innehåller:
+`src/app/iup/[id]/page.tsx` var tidigare mycket stor och blandade:
 
 - dataladdning
 - auth-kontroll
@@ -119,29 +134,31 @@ Konsekvens:
 - editor-UI
 - arkivering/radering
 
-Det här är den största källan till framtida underhållsrisk.
+Status 2026-04-08:
 
-Rekommendation:
+- sidan är nu nere på cirka 525 rader
+- steg-UI är brutet ut till egna komponenter
+- review, auth/init, planladdning, foto, save-actions och suggestions ligger i egna hooks
 
-- bryt ut domänlogik till hooks eller services
-- bryt ut UI i mindre komponenter per steg
-- separera lokal draft-logik från serverlagrad IUP-logik
+Bedömning:
 
-### 2. Målförslag finns både lokalt och i databasen, men används inte konsekvent
+- detta är inte längre den mest akuta riskytan i projektet
+- fortsatt finputs kan göras, men huvudproblemet är redan tydligt reducerat
 
-Det finns stöd i databasen och API:t för `iup_goal_suggestions`, men IUP-sidan använder fortfarande `localStorage` för anpassade förslag.
+### 2. Målförslag har nu tydligare källa, men produktgränserna måste hållas tydliga
+
+Det finns stöd i databasen och API:t för `iup_goal_suggestions`. IUP-sidan använder nu databasen för inloggade användare och behåller `localStorage` endast för `FREE`.
 
 Konsekvens:
 
-- samma funktion finns i två modeller
-- användarens data blir enhetsbunden istället för kontobunden
-- databasen bär på funktionalitet som inte nyttjas fullt ut
+- `AUTH` och `PAID` får konto-bundna målförslag i stället för enhetsbundna
+- `FREE` kan fortsatt fungera utan konto och utan databasberoende
+- den tekniska strategin är tydligare än tidigare
 
-Rekommendation:
+Kvar att bevaka:
 
-- välj en strategi
-- om inloggad användare ska ha egna målbibliotek: använd DB-spåret fullt ut
-- behåll `localStorage` endast som fallback för `FREE`
+- produktbeteendet för `AUTH` kontra `PAID` måste fortsätta vara konsekvent i UI och dokumentation
+- dubbla lagringsmodeller finns fortfarande medvetet kvar eftersom `FREE` är offline/lokal
 
 ### 3. Avsaknad av automatiserade tester och linting
 
@@ -156,17 +173,37 @@ Projektet har idag scripts för:
 Det saknas:
 
 - enhets- eller integrationstester
-- E2E-smoke
-- lint-script
+- full browser-E2E
+
+Status 2026-04-08:
+
+- `lint`-script finns nu i projektet
+- `ci` kör nu lint före `typecheck` och build
+- ett första automatiserat smoke-test finns nu som kontraktstest för kärnmoduler och scripts
+- nästa kvalitetsgap i denna del är full browser-E2E, inte avsaknad av smoke över huvud taget
 
 Det betyder att mycket funktionalitet bara skyddas av manuell testning.
 
 Rekommendation:
 
-- inför åtminstone ett lätt E2E-smoke för kärnflöden
-- lägg till linting innan koden växer vidare
+- håll lint- och smoke-rutinen aktiv
+- lägg till full browser-E2E när build-/Windows-blockeraren inte längre styr teststrategin
 
-### 4. Settings-sidan är fortfarande grov
+### 4. README speglar nu projektets faktiska läge bättre
+
+README var tidigare skriven mer som en starter-mall än som driftbar dokumentation.
+
+Status 2026-04-08:
+
+- setup och databasordning är dokumenterade mot faktisk kodbas
+- `FREE`, `AUTH` och `PAID` är beskrivna utifrån nuvarande beteende
+- kvalitetsgrind och kända begränsningar finns dokumenterade
+
+Bedömning:
+
+- dokumentationen är nu tillräckligt nära verkligheten för att fungera som arbetsunderlag
+- framtida uppdateringar bör nu handla om produktförändringar, inte om att rätta gammal starter-text
+### 5. Settings-sidan är fortfarande grov
 
 `src/app/settings/page.tsx` använder inline styles och en lokal `localStorage`-toggle för coach-skattning. Det fungerar, men känns mer som ett internt hjälpsteg än en färdig del av produkten.
 
@@ -186,6 +223,16 @@ Följande är påbörjat eller antytt i modellen, men ännu inte färdigt som he
 - bättre statushantering än endast `active/completed/archived`
 - tydligare deploy- och releaseprocess
 
+Status 2026-04-08:
+
+- ett första spelarläge finns nu som läs- och egen-skattningsflöde
+- kopplad spelare kan se egna planer från startsidan och öppna dem i spelarläge
+- spelaren kan spara egen nulägesbild och självskattning utan att få coachens redigeringsrättigheter
+- första check-in-tidslinjen finns nu i IUP-vyn för coach och kopplad spelare
+- check-ins kan nu knytas till både mål och review points i UI:t
+- `team_members.user_id` används nu också i verkligt produktflöde: coachen kan spara spelarens e-post i squad-vyn och spelaren claim:ar sin koppling automatiskt vid inloggning
+- coachredigering och full uppföljningsdialog är fortfarande inte färdiga rollflöden
+
 ## Rekommenderad prioritering
 
 ### Prioritet 1: innan mer funktionalitet byggs
@@ -193,20 +240,20 @@ Följande är påbörjat eller antytt i modellen, men ännu inte färdigt som he
 1. Rätta mismatch kring `review_count` mellan UI och databas.
 2. Säkra att `npm run ci` går igenom i ren miljö.
 3. Bestäm och dokumentera faktisk åtkomstmodell: endast ägare eller även teammedlemmar.
-4. Bryt upp `src/app/iup/[id]/page.tsx` i mindre delar.
+4. Håll den uppdelade IUP-editorn stabil och undvik att lägga tillbaka blandat ansvar i `page.tsx`.
 
 ### Prioritet 2: för att göra första versionen robust
 
-1. Flytta målförslag för inloggade användare från lokal lagring till Supabase.
-2. Lägg till linting och minst ett automatiserat smoke-flöde.
-3. Definiera tydligt vad `FREE`, `AUTH` och `PAID` faktiskt innebär funktionellt.
-4. Förbättra README med verklig setup, kända begränsningar och release-checklista.
+1. Lägg till linting och minst ett automatiserat smoke-flöde.
+2. Definiera tydligt vad `FREE`, `AUTH` och `PAID` faktiskt innebär funktionellt i all produktnära dokumentation.
+3. Förbättra README med verklig setup, kända begränsningar och release-checklista.
+4. Verifiera att suggestions-flödet beter sig rätt i både `FREE` och inloggat läge.
 
 ### Prioritet 3: framåt
 
 1. Bygg riktiga rollflöden för coach/spelare.
-2. Aktivera check-ins som en central del av IUP-arbetet.
-3. Använd `team_members.user_id` och rollstyrning för spelarinloggning och egen uppföljning.
+2. Fördjupa check-ins med bättre uppföljningsdialog, filtrering eller historikvy.
+3. Fördjupa rollstyrningen ovanpå den nya `team_members.user_id`-kopplingen, till exempel med tydligare invite/link-UI.
 4. Lägg till notiser, deadlines och uppföljningspåminnelser.
 5. Följ upp med analys/rapportering per spelare och period.
 

@@ -18,21 +18,21 @@ Använd den här listan som löpande avprickning under arbetet.
 
 ### Teknisk risk
 
-- [ ] Dela upp [page.tsx](c:/Dev/projects/webtools/iup/src/app/iup/[id]/page.tsx) i mindre ansvar.
-- [ ] Välj en enda strategi för målförslag för `FREE`, `AUTH`, `PAID`.
+- [x] Dela upp [page.tsx](c:/Dev/projects/webtools/iup/src/app/iup/[id]/page.tsx) i mindre ansvar.
+- [x] Välj en enda strategi för målförslag för `FREE`, `AUTH`, `PAID`.
 
 ### Kvalitetsgrund
 
-- [ ] Lägg till linting i projektet och i `ci`.
-- [ ] Lägg till minimala automatiserade smoke-tester.
-- [ ] Skärp [README.md](c:/Dev/projects/webtools/iup/README.md) till driftbar dokumentation.
+- [x] Lägg till linting i projektet och i `ci`.
+- [x] Lägg till minimala automatiserade smoke-tester.
+- [x] Skärp [README.md](c:/Dev/projects/webtools/iup/README.md) till driftbar dokumentation.
 
 ### Produktifiering
 
-- [ ] Definiera produktbeteende för `FREE`, `AUTH`, `PAID`.
+- [x] Definiera produktbeteende för `FREE`, `AUTH`, `PAID`.
 - [ ] Bygg riktiga rollflöden för coach och spelare.
-- [ ] Aktivera check-ins som faktisk UI-funktion.
-- [ ] Aktivera spelarkonto-koppling via `team_members.user_id`.
+- [x] Aktivera check-ins som faktisk UI-funktion.
+- [x] Aktivera spelarkonto-koppling via `team_members.user_id`.
 
 ## Sprintchecklista
 
@@ -44,20 +44,20 @@ Använd den här listan som löpande avprickning under arbetet.
 
 ### Sprint 2
 
-- [ ] Bryt upp IUP-editorn.
-- [ ] Koppla målförslag till Supabase för inloggade användare.
+- [x] Bryt upp IUP-editorn.
+- [x] Koppla målförslag till Supabase för inloggade användare.
 
 ### Sprint 3
 
-- [ ] Lägg till linting.
-- [ ] Lägg till smoke-test.
-- [ ] Skärp README.
+- [x] Lägg till linting.
+- [x] Lägg till smoke-test.
+- [x] Skärp README.
 
 ### Sprint 4
 
-- [ ] Definiera planer och roller.
-- [ ] Bygg check-ins i UI.
-- [ ] Börja använda `team_members.user_id` och rollstyrning fullt ut.
+- [x] Definiera planer och roller.
+- [x] Bygg check-ins i UI.
+- [x] Börja använda `team_members.user_id` och rollstyrning fullt ut.
 
 ## Principer
 
@@ -119,6 +119,17 @@ Status 2026-04-06:
 - build fallerar fortfarande lokalt på Windows med `EPERM` i Next-builden
 - kräver fortsatt åtgärd i buildmiljö/rutin innan punkten kan bockas av
 
+Status 2026-04-08:
+
+- `scripts/build-ci.mjs` använder nu unik CI-buildkatalog per körning
+- CI-builden använder temporär `tsconfig` för att undvika att vanlig `tsconfig.json` muteras av Next
+- Turbopack fallerar lokalt på Windows med filsystemfel vid rename/unlink i build-output
+- webpack-build kommer längre men fallerar fortfarande lokalt på Windows:
+  - med worker-processer: `spawn EPERM`
+  - med worker threads: `DataCloneError`
+- problemet är nu avgränsat till Next.js-build på lokal Windows-miljö, inte till appens TypeScript- eller UI-kod
+- punkten är fortfarande öppen
+
 ### 3. Bestäm faktisk åtkomstmodell
 
 Problem:
@@ -138,6 +149,12 @@ Leverabler:
 - uppdaterad README/statusdokumentation
 
 Prioritet: Hög
+
+Status 2026-04-08:
+
+- åtkomstmodellen är fastslagen för v1 och dokumenterad i kod/dokumentation
+- coachflödet använder admin-scope och inte allmän teammedlemsåtkomst
+- punkten är genomförd
 
 Beslut 2026-04-06:
 
@@ -179,6 +196,27 @@ Leverabler:
 
 Prioritet: Hög
 
+Status 2026-04-08:
+
+- första uppdelningspass genomfört
+- ren domänlogik för assessment, review cadence, suggestions och spelarhjälpare bruten ut från [page.tsx](c:/Dev/projects/webtools/iup/src/app/iup/[id]/page.tsx) till [editorUtils.ts](c:/Dev/projects/webtools/iup/src/lib/iup/editorUtils.ts)
+- stegsektioner brutna ut till komponenter:
+  - [PlayerProfileStep.tsx](c:/Dev/projects/webtools/iup/src/app/iup/[id]/components/PlayerProfileStep.tsx)
+  - [CurrentStateStep.tsx](c:/Dev/projects/webtools/iup/src/app/iup/[id]/components/CurrentStateStep.tsx)
+  - [GoalsStep.tsx](c:/Dev/projects/webtools/iup/src/app/iup/[id]/components/GoalsStep.tsx)
+  - [SummaryStep.tsx](c:/Dev/projects/webtools/iup/src/app/iup/[id]/components/SummaryStep.tsx)
+- profilheader och review-toolbar brutna ut till [IupHeader.tsx](c:/Dev/projects/webtools/iup/src/app/iup/[id]/components/IupHeader.tsx)
+- huvudfilen minskad från cirka 2650 till cirka 1390 rader
+- första hook för review state/logik bruten ut till [useIupReviewState.ts](c:/Dev/projects/webtools/iup/src/app/iup/[id]/hooks/useIupReviewState.ts)
+- `auth/init` brutet ut till [useIupAuthInit.ts](c:/Dev/projects/webtools/iup/src/app/iup/[id]/hooks/useIupAuthInit.ts)
+- planladdning och lokal draft-återställning brutet ut till [useIupPlanLoader.ts](c:/Dev/projects/webtools/iup/src/app/iup/[id]/hooks/useIupPlanLoader.ts)
+- photo state/helpers brutet ut till [useIupPhotoState.ts](c:/Dev/projects/webtools/iup/src/app/iup/[id]/hooks/useIupPhotoState.ts)
+- save/complete/archive/delete brutet ut till [useIupSaveActions.ts](c:/Dev/projects/webtools/iup/src/app/iup/[id]/hooks/useIupSaveActions.ts)
+- suggestions-state brutet ut till [useIupSuggestionsState.ts](c:/Dev/projects/webtools/iup/src/app/iup/[id]/hooks/useIupSuggestionsState.ts)
+- custom suggestions ägs nu av suggestions-hooken i stället för `auth/init`, vilket gör nästa DB-koppling tydligare
+- huvudfilen minskad vidare till cirka 525 rader
+- punkten är genomförd som riskreducering, även om fortsatt finputs kan göras senare
+
 ### 5. Välj en enda strategi för målförslag
 
 Problem:
@@ -199,6 +237,14 @@ Leverabler:
 
 Prioritet: Hög
 
+Status 2026-04-08:
+
+- `AUTH`/inloggade användare läser nu custom suggestions från databasen via [iupApi.ts](c:/Dev/projects/webtools/iup/src/lib/iupApi.ts)
+- samma flöde sparar nu tillbaka till `iup_goal_suggestions` vid spara/slutför
+- `FREE` behåller lokal lagring för custom suggestions
+- suggestions-state äger nu datakällan i [useIupSuggestionsState.ts](c:/Dev/projects/webtools/iup/src/app/iup/[id]/hooks/useIupSuggestionsState.ts)
+- punkten är genomförd
+
 ## Fas 3: Sätt grund för kvalitet
 
 Mål: minska beroendet av manuell testning.
@@ -217,6 +263,13 @@ Leverabler:
 
 Prioritet: Medium
 
+Status 2026-04-08:
+
+- `lint`-script tillagt i [package.json](c:/Dev/projects/webtools/iup/package.json)
+- `ci` kör nu `lint` före `typecheck` och build
+- ESLint flat config tillagd i [eslint.config.mjs](c:/Dev/projects/webtools/iup/eslint.config.mjs)
+- punkten är genomförd i kodbasen
+
 ### 7. Lägg till minimala automatiserade smoke-tester
 
 Fokusflöden:
@@ -233,6 +286,14 @@ Leverabler:
 
 Prioritet: Medium
 
+Status 2026-04-08:
+
+- `smoke`-script tillagt i [package.json](c:/Dev/projects/webtools/iup/package.json)
+- smoke-kontroll tillagd i [smoke-contracts.mjs](c:/Dev/projects/webtools/iup/scripts/smoke-contracts.mjs)
+- `ci` kör nu `smoke` efter `lint` och `typecheck`
+- nuvarande smoke är en lätt kontraktstest för kärnmoduler och scripts, inte full browser-E2E
+- punkten är genomförd som första automatiserade smoke-nivå
+
 ### 8. Skärp README till driftbar dokumentation
 
 Åtgärd:
@@ -247,6 +308,14 @@ Leverabler:
 - uppdaterad [README.md](c:/Dev/projects/webtools/iup/README.md)
 
 Prioritet: Medium
+
+Status 2026-04-08:
+
+- [README.md](c:/Dev/projects/webtools/iup/README.md) omskriven från starter-text till faktisk projektdokumentation
+- setup, databasordning, produktnivåer och åtkomstmodell är nu dokumenterade
+- kvalitetsgrind med `lint`, `typecheck`, `smoke` och `ci` är beskriven
+- kända begränsningar för lokal Windows/Next-build är dokumenterade
+- punkten är genomförd
 
 ## Fas 4: Produktifiering
 
@@ -266,6 +335,29 @@ Leverabler:
 
 Prioritet: Medium
 
+Regelverk 2026-04-08:
+
+- `FREE` används utan inloggning.
+- `FREE` kan skapa och öppna tillfälliga IUP-utkast i nuvarande session.
+- `FREE` sparar utkast i `sessionStorage`, inte i databasen.
+- `FREE` sparar egna målförslag lokalt i `localStorage`.
+- `FREE` har inte tillgång till trupphantering eller serverlagrade spelarflöden.
+- `AUTH` används av inloggad användare utan `PAID`-truppflöde.
+- `AUTH` kan skapa och öppna egna IUP:er och arbeta vidare i editorn.
+- `AUTH` använder lokala utkast per användare på enheten som återställningsspår.
+- `AUTH` sparar egna målförslag konto-bundet i databasen via `iup_goal_suggestions`.
+- `AUTH` får inte truppsidan eller lagadministration som kräver `PAID`.
+- `PAID` inkluderar allt i `AUTH`.
+- `PAID` låser dessutom upp trupphantering, spelare i databas och coachflödet kring lagets spelare.
+- coach/admin-flödet i v1 gäller lagägare, aktiv team-admin och aktiv klubb-admin för lagets klubb.
+- vanlig teammedlem eller spelare utan adminroll ingår ännu inte i coachflödet.
+
+Status 2026-04-08:
+
+- regelverket är dokumenterat
+- teknisk gating finns delvis redan i UI/API
+- rollflöden för coach respektive spelare återstår som separat produktsteg
+
 ### 10. Bygg riktiga rollflöden
 
 Behov:
@@ -279,6 +371,16 @@ Beroenden:
 - åtkomstmodell måste vara fastslagen först
 
 Prioritet: Medium
+
+Status 2026-04-08:
+
+- första spelarläget är infört som läs- och egen-skattningsflöde
+- kopplad spelare kan nu se sina egna IUP:er från startsidan via [fetchMyPlayerPlans](c:/Dev/projects/webtools/iup/src/lib/iupApi.ts)
+- IUP-vyn visar nu tydligare spelarroll i läsläge i [page.tsx](c:/Dev/projects/webtools/iup/src/app/iup/[id]/page.tsx)
+- RLS för läsning är utökad i [iup_schema.sql](c:/Dev/projects/webtools/iup/supabase/iup_schema.sql) så att kopplad spelare kan läsa egen plan, mål och check-ins
+- spelaren kan nu spara egen nulägesbild och självskattning via [save_iup_player_assessment](c:/Dev/projects/webtools/iup/supabase/iup_schema.sql)
+- coachredigering är fortsatt separat från spelarläget
+- punkten är påbörjad men inte färdig: check-ins, spelarspecifik uppföljning och full rollprodukt återstår
 
 ### 11. Aktivera check-ins som faktisk funktion
 
@@ -294,6 +396,17 @@ Behov:
 
 Prioritet: Medium
 
+Status 2026-04-08:
+
+- första check-in-tidslinjen finns nu i IUP-vyn via [CheckinsSection.tsx](c:/Dev/projects/webtools/iup/src/app/iup/[id]/components/CheckinsSection.tsx)
+- coach och kopplad spelare kan läsa check-ins på egen IUP
+- coach och kopplad spelare kan skapa egna check-ins via [createIupCheckin](c:/Dev/projects/webtools/iup/src/lib/iupApi.ts)
+- användare kan ta bort sina egna check-ins
+- insert-policy i [iup_schema.sql](c:/Dev/projects/webtools/iup/supabase/iup_schema.sql) stödjer nu både coach/admin och kopplad spelare
+- check-ins kan nu också kopplas explicit till mål och återkopplingspunkt i UI:t
+- `iup_checkins` bär nu även `review_point_id` för denna koppling
+- punkten är genomförd som första riktiga produktnivå för check-ins
+
 ### 12. Aktivera spelarkonto-koppling
 
 Behov:
@@ -306,6 +419,14 @@ Behov:
 - möjliggör spelarspecifik inloggning och självskattning
 
 Prioritet: Låg till Medium
+
+Status 2026-04-08:
+
+- squad-vyn kan nu spara spelarens e-post på `team_members`
+- ny RPC i [iup_schema.sql](c:/Dev/projects/webtools/iup/supabase/iup_schema.sql) låter inloggad användare claim:a matchande spelarposter via e-post och sätta `team_members.user_id`
+- claim körs nu automatiskt vid inloggning och vid init av IUP-sidan via [page.tsx](c:/Dev/projects/webtools/iup/src/app/page.tsx) och [useIupAuthInit.ts](c:/Dev/projects/webtools/iup/src/app/iup/[id]/hooks/useIupAuthInit.ts)
+- detta gör att spelarläget, `Mina IUP` och spelarens egen uppföljning kan börja fungera utan manuell databaskoppling
+- punkten är genomförd som första riktig produktnivå för spelarkonto-koppling
 
 ## Rekommenderad ordning vecka för vecka
 
@@ -379,3 +500,22 @@ Om arbetet ska påbörjas direkt är bästa ordningen:
 3. därefter ta uppdelningen av IUP-editorn
 
 Det ger högst riskreduktion per insats.
+
+## Arbetslogg 2026-04-08
+
+Genomfört:
+
+- språkstöd justerat för sökfält, mål-pills och review-plan i UI
+- build-check undersökt vidare i lokal Windows-miljö
+- CI-skriptet förbättrat för separat build-output och separat CI-tsconfig
+
+Verifierat:
+
+- `npm run typecheck` passerar
+- `npm run ci` fallerar fortfarande lokalt i Next-builden trots separat CI-output
+
+Föreslaget nästa steg:
+
+1. verifiera samma build i ren extern CI-miljö eller annan Windows-maskin utan lokal låsning/AV-påverkan
+2. om felet reproduceras där: pinn eller nedgradera Next-version alternativt testa annan buildkonfiguration isolerat
+3. om felet inte reproduceras där: dokumentera lokal Windows-begränsning i README och fortsätt med Sprint 2

@@ -166,6 +166,112 @@ grant execute on function public.save_iup_plan_editor(
   jsonb
 ) to authenticated;
 
+create or replace function public.save_iup_player_assessment(
+  p_plan_id uuid,
+  p_now_state text,
+  p_self_assessment jsonb,
+  p_selected_review_point_id text,
+  p_review_now_state text,
+  p_review_self_assessment jsonb
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_review_point jsonb;
+  v_next_review_points jsonb := '[]'::jsonb;
+  v_plan record;
+begin
+  if jsonb_typeof(coalesce(p_self_assessment, '[]'::jsonb)) <> 'array' then
+    raise exception 'p_self_assessment must be a JSON array';
+  end if;
+
+  if jsonb_typeof(coalesce(p_review_self_assessment, '[]'::jsonb)) <> 'array' then
+    raise exception 'p_review_self_assessment must be a JSON array';
+  end if;
+
+  select id, player_id, review_points
+  into v_plan
+  from iup_plans
+  where id = p_plan_id
+    and exists (
+      select 1
+      from team_members tm
+      where tm.id = iup_plans.player_id
+        and tm.user_id = auth.uid()
+        and tm.is_active = true
+    );
+
+  if not found then
+    raise exception 'IUP not found or forbidden';
+  end if;
+
+  for v_review_point in
+    select value
+    from jsonb_array_elements(coalesce(v_plan.review_points, '[]'::jsonb))
+  loop
+    if coalesce(v_review_point->>'id', '') = coalesce(p_selected_review_point_id, '') then
+      v_review_point := jsonb_set(v_review_point, '{nowState}', to_jsonb(coalesce(p_review_now_state, '')), true);
+      v_review_point := jsonb_set(v_review_point, '{selfAssessment}', coalesce(p_review_self_assessment, '[]'::jsonb), true);
+    end if;
+    v_next_review_points := v_next_review_points || jsonb_build_array(v_review_point);
+  end loop;
+
+  update iup_plans
+  set
+    now_state = coalesce(p_now_state, ''),
+    self_assessment = coalesce(p_self_assessment, '[]'::jsonb),
+    review_points = v_next_review_points,
+    updated_at = now()
+  where id = p_plan_id;
+end;
+$$;
+
+grant execute on function public.save_iup_player_assessment(
+  uuid,
+  text,
+  jsonb,
+  text,
+  text,
+  jsonb
+) to authenticated;
+
+create or replace function public.claim_team_member_links_by_email()
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_email text := lower(coalesce(auth.jwt() ->> 'email', ''));
+  v_count integer := 0;
+begin
+  if auth.uid() is null or v_email = '' then
+    return 0;
+  end if;
+
+  update team_members
+  set
+    user_id = auth.uid(),
+    updated_at = now()
+  where user_id is null
+    and is_active = true
+    and lower(coalesce(email, '')) = v_email
+    and (
+      lower(coalesce(role, '')) = 'player'
+      or lower(coalesce(team_role, '')) = 'player'
+      or team_position is not null
+    );
+
+  get diagnostics v_count = row_count;
+  return v_count;
+end;
+$$;
+
+grant execute on function public.claim_team_member_links_by_email() to authenticated;
+
 create table if not exists iup_plans (
   id uuid primary key default gen_random_uuid(),
   team_id uuid not null references teams(id) on delete cascade,
@@ -260,6 +366,7 @@ create table if not exists iup_checkins (
   id uuid primary key default gen_random_uuid(),
   plan_id uuid not null references iup_plans(id) on delete cascade,
   goal_id uuid references iup_goals(id) on delete set null,
+  review_point_id text,
   author_id uuid not null references auth.users(id) on delete restrict,
   author_role text not null default 'coach',
   rating integer,
@@ -303,7 +410,18 @@ drop policy if exists "Users can delete team IUP plans" on iup_plans;
 create policy "Users can view team IUP plans"
 on iup_plans
 for select
-using (public.can_admin_team(team_id));
+using (
+  public.can_admin_team(team_id)
+  or exists (
+    select 1
+    from team_members tm
+    where tm.id = iup_plans.player_id
+      and tm.user_id = auth.uid()
+      and tm.is_active = true
+  )
+);
+
+alter table if exists iup_checkins add column if not exists review_point_id text;
 
 create policy "Users can insert team IUP plans"
 on iup_plans
@@ -334,7 +452,16 @@ using (
     select 1
     from iup_plans p
     where p.id = iup_goals.plan_id
-      and public.can_admin_team(p.team_id)
+      and (
+        public.can_admin_team(p.team_id)
+        or exists (
+          select 1
+          from team_members tm
+          where tm.id = p.player_id
+            and tm.user_id = auth.uid()
+            and tm.is_active = true
+        )
+      )
   )
 );
 
@@ -394,7 +521,16 @@ using (
     select 1
     from iup_plans p
     where p.id = iup_checkins.plan_id
-      and public.can_admin_team(p.team_id)
+      and (
+        public.can_admin_team(p.team_id)
+        or exists (
+          select 1
+          from team_members tm
+          where tm.id = p.player_id
+            and tm.user_id = auth.uid()
+            and tm.is_active = true
+        )
+      )
   )
 );
 
@@ -407,7 +543,16 @@ with check (
     select 1
     from iup_plans p
     where p.id = iup_checkins.plan_id
-      and public.can_admin_team(p.team_id)
+      and (
+        public.can_admin_team(p.team_id)
+        or exists (
+          select 1
+          from team_members tm
+          where tm.id = p.player_id
+            and tm.user_id = auth.uid()
+            and tm.is_active = true
+        )
+      )
   )
 );
 

@@ -45,6 +45,7 @@ export type PaidPlayer = {
 
 export type SquadPlayer = PaidPlayer & {
   userId?: string;
+  email?: string;
   birthDate?: string;
   dominantFoot?: string;
   heightCm?: number;
@@ -66,6 +67,7 @@ export type PlayerListFilters = {
 export type SquadPlayerInput = {
   teamId: string;
   name: string;
+  email?: string;
   number?: number;
   positionLabel?: string;
   birthDate?: string;
@@ -85,6 +87,11 @@ export type IupPlanLite = {
   periodStart?: string;
   periodEnd?: string;
   createdAt: string;
+};
+
+export type MyPlayerPlanLite = IupPlanLite & {
+  playerName: string;
+  teamName?: string;
 };
 
 export type IupPlanDetail = IupPlanLite & {
@@ -128,6 +135,18 @@ export type IupGoalDraft = {
   status: "todo" | "in_progress" | "done";
 };
 
+export type IupCheckin = {
+  id: string;
+  planId: string;
+  goalId?: string;
+  reviewPointId?: string;
+  authorId: string;
+  authorRole: "coach" | "player" | "other";
+  rating?: number;
+  note: string;
+  createdAt: string;
+};
+
 export type UserGoalSuggestion = {
   horizon: "short" | "long";
   title: string;
@@ -140,6 +159,7 @@ export type IupPlanEditor = {
   goals: IupGoalDraft[];
   player: {
     id: string;
+    userId?: string;
     name: string;
     number?: number;
     positionLabel?: string;
@@ -478,6 +498,102 @@ export const fetchIupPlansForPlayer = async (
   return { ok: true, plans };
 };
 
+export const fetchMyPlayerPlans = async (): Promise<
+  { ok: true; plans: MyPlayerPlanLite[] } | { ok: false; error: string }
+> => {
+  if (!supabase) {
+    return { ok: false, error: "Supabase missing." };
+  }
+  const user = await getSessionUser();
+  if (!user) {
+    return { ok: false, error: "Not signed in." };
+  }
+
+  const { data: memberData, error: memberError } = await supabase
+    .from("team_members")
+    .select("id,team_id,display_name,team_position,role,team_role,shirt_number,metadata,is_active")
+    .eq("user_id", user.id)
+    .eq("is_active", true);
+  if (memberError) {
+    return { ok: false, error: memberError.message };
+  }
+
+  const playerMembers = ((memberData ?? []) as Array<{
+    id: string;
+    team_id: string;
+    display_name: string | null;
+    team_position?: string | null;
+    role?: string | null;
+    team_role?: string | null;
+    shirt_number?: number | null;
+    metadata?: unknown;
+    is_active?: boolean | null;
+  }>).filter(isPlayerMember);
+
+  if (playerMembers.length === 0) {
+    return { ok: true, plans: [] };
+  }
+
+  const playerIds = playerMembers.map((member) => member.id);
+  const playerNameById = new Map(
+    playerMembers.map((member) => [member.id, member.display_name ?? "Spelare"] as const)
+  );
+
+  const { data: planData, error: planError } = await supabase
+    .from("iup_plans")
+    .select("id,title,status,player_id,team_id,period_start,period_end,created_at")
+    .in("player_id", playerIds)
+    .order("updated_at", { ascending: false });
+  if (planError) {
+    return { ok: false, error: planError.message };
+  }
+
+  const teamIds = Array.from(
+    new Set(
+      ((planData ?? []) as Array<{ team_id: string | null }>).map((row) => String(row.team_id ?? "")).filter(Boolean)
+    )
+  );
+  let teamNameById = new Map<string, string>();
+  if (teamIds.length > 0) {
+    const { data: teamData, error: teamError } = await supabase
+      .from("teams")
+      .select("id,name")
+      .in("id", teamIds);
+    if (teamError) {
+      return { ok: false, error: teamError.message };
+    }
+    teamNameById = new Map(
+      ((teamData ?? []) as Array<{ id: string; name: string | null }>).map((team) => [
+        team.id,
+        team.name ?? "",
+      ])
+    );
+  }
+
+  const plans = ((planData ?? []) as Array<{
+    id: string;
+    title: string;
+    status: IupPlanLite["status"];
+    player_id: string;
+    team_id: string;
+    period_start: string | null;
+    period_end: string | null;
+    created_at: string;
+  }>).map((row) => ({
+    id: row.id,
+    title: row.title,
+    status: normalizePlanStatus(row.status),
+    playerId: row.player_id,
+    playerName: playerNameById.get(row.player_id) ?? "Spelare",
+    teamName: teamNameById.get(row.team_id) ?? undefined,
+    periodStart: row.period_start ?? undefined,
+    periodEnd: row.period_end ?? undefined,
+    createdAt: row.created_at,
+  }));
+
+  return { ok: true, plans };
+};
+
 const svMonthMap: Record<string, number> = {
   jan: 0,
   februari: 1,
@@ -647,11 +763,11 @@ export const fetchPaidPlayers = async (
     return { ok: true, players: [] };
   }
 
-  let query = supabase
-    .from("team_members")
-    .select(
-      "id,team_id,user_id,display_name,shirt_number,team_position,is_active,photo_url,role,team_role,metadata"
-    )
+    let query = supabase
+      .from("team_members")
+      .select(
+        "id,team_id,user_id,email,display_name,shirt_number,team_position,is_active,photo_url,role,team_role,metadata"
+      )
     .in("team_id", teamIds)
     .order("team_id", { ascending: true })
     .order("sort_order", { ascending: true })
@@ -688,6 +804,7 @@ export const fetchPaidPlayers = async (
     id: string;
     team_id: string;
     user_id?: string | null;
+    email?: string | null;
     display_name: string | null;
     shirt_number: number | null;
     team_position: string | null;
@@ -805,7 +922,7 @@ export const fetchSquadPlayers = async (
     query = query.or(orParts.join(","));
   }
 
-  let { data: players, error: playerError } = await query;
+  const { data: players, error: playerError } = await query;
   if (playerError) {
     return { ok: false, error: playerError.message };
   }
@@ -814,6 +931,7 @@ export const fetchSquadPlayers = async (
     id: string;
     team_id: string;
     user_id?: string | null;
+    email?: string | null;
     display_name: string | null;
     shirt_number: number | null;
     team_position: string | null;
@@ -840,6 +958,7 @@ export const fetchSquadPlayers = async (
         positionLabel: player.team_position ?? "",
         isActive: Boolean(player.is_active),
         userId: player.user_id ?? undefined,
+        email: player.email ?? undefined,
         photoUrl: player.photo_url ?? undefined,
         birthDate: metadata.birthDate,
         dominantFoot: metadata.dominantFoot,
@@ -877,11 +996,12 @@ export const createSquadPlayer = async (
     return { ok: false, error: "Not signed in." };
   }
 
-  const { data, error } = await supabase
-    .from("team_members")
-    .insert({
-      team_id: payload.teamId,
-      display_name: payload.name.trim(),
+    const { data, error } = await supabase
+      .from("team_members")
+      .insert({
+        team_id: payload.teamId,
+        email: payload.email?.trim() || null,
+        display_name: payload.name.trim(),
       role: "player",
       team_role: "player",
       team_position: payload.positionLabel?.trim() || null,
@@ -922,11 +1042,12 @@ export const updateSquadPlayer = async (
     return { ok: false, error: "Not signed in." };
   }
 
-  const { error } = await supabase
-    .from("team_members")
-    .update({
-      display_name: payload.name.trim(),
-      team_position: payload.positionLabel?.trim() || null,
+    const { error } = await supabase
+      .from("team_members")
+      .update({
+        email: payload.email?.trim() || null,
+        display_name: payload.name.trim(),
+        team_position: payload.positionLabel?.trim() || null,
       shirt_number: payload.number ?? null,
       metadata: buildSquadMetadata(payload),
     })
@@ -996,6 +1117,23 @@ export const archiveSquadPlayer = async (
     return { ok: false, error: error.message };
   }
   return { ok: true };
+};
+
+export const claimMyPlayerLinks = async (): Promise<
+  { ok: true; linkedCount: number } | { ok: false; error: string }
+> => {
+  if (!supabase) {
+    return { ok: false, error: "Supabase missing." };
+  }
+  const user = await getSessionUser();
+  if (!user) {
+    return { ok: false, error: "Not signed in." };
+  }
+  const { data, error } = await supabase.rpc("claim_team_member_links_by_email");
+  if (error) {
+    return { ok: false, error: error.message };
+  }
+  return { ok: true, linkedCount: typeof data === "number" ? data : 0 };
 };
 
 export const restoreSquadPlayer = async (
@@ -1225,6 +1363,7 @@ export const fetchIupPlanEditor = async (
       ? (() => {
           const member = playerRow as {
             id?: string;
+            user_id?: string | null;
             display_name?: string | null;
             shirt_number?: number | null;
             team_position?: string | null;
@@ -1234,6 +1373,7 @@ export const fetchIupPlanEditor = async (
           const metadata = parseSquadMetadata(member.metadata);
           return {
             id: String(member.id ?? ""),
+            userId: member.user_id ?? undefined,
             name: String(member.display_name ?? "Player"),
             number:
               typeof member.shirt_number === "number" ? member.shirt_number : undefined,
@@ -1252,6 +1392,48 @@ export const fetchIupPlanEditor = async (
       : null;
 
   return { ok: true, data: { plan: planResult.plan, goals, player } };
+};
+
+export const fetchIupCheckins = async (
+  planId: string
+): Promise<{ ok: true; checkins: IupCheckin[] } | { ok: false; error: string }> => {
+  if (!supabase) {
+    return { ok: false, error: "Supabase missing." };
+  }
+  const { data, error } = await supabase
+    .from("iup_checkins")
+    .select("id,plan_id,goal_id,review_point_id,author_id,author_role,rating,note,created_at")
+    .eq("plan_id", planId)
+    .order("created_at", { ascending: false });
+  if (error) {
+    return { ok: false, error: error.message };
+  }
+  const checkins: IupCheckin[] = ((data ?? []) as Array<{
+    id: string;
+    plan_id: string;
+    goal_id: string | null;
+    review_point_id: string | null;
+    author_id: string;
+    author_role: "coach" | "player" | "other" | null;
+    rating: number | null;
+    note: string | null;
+    created_at: string;
+  }>).map((row) => ({
+    id: row.id,
+    planId: row.plan_id,
+    goalId: row.goal_id ?? undefined,
+    reviewPointId: row.review_point_id ?? undefined,
+    authorId: row.author_id,
+    authorRole: (
+      row.author_role === "player" || row.author_role === "other"
+        ? row.author_role
+        : "coach"
+    ) as IupCheckin["authorRole"],
+    rating: typeof row.rating === "number" ? row.rating : undefined,
+    note: row.note ?? "",
+    createdAt: row.created_at,
+  }));
+  return { ok: true, checkins };
 };
 
 export const saveIupPlanEditor = async (payload: {
@@ -1310,6 +1492,88 @@ export const saveIupPlanEditor = async (payload: {
     p_short_goals: payload.shortGoals,
     p_long_goals: payload.longGoals,
   });
+  if (error) {
+    return { ok: false, error: error.message };
+  }
+  return { ok: true };
+};
+
+export const saveIupPlayerAssessment = async (payload: {
+  planId: string;
+  nowState: string;
+  selfAssessment: Array<{
+    area: string;
+    score: number;
+    note: string;
+    coachScore?: number;
+  }>;
+  selectedReviewPointId: string;
+  reviewNowState: string;
+  reviewSelfAssessment: Array<{
+    area: string;
+    score: number;
+    note: string;
+    coachScore?: number;
+  }>;
+}): Promise<{ ok: true } | { ok: false; error: string }> => {
+  if (!supabase) {
+    return { ok: false, error: "Supabase missing." };
+  }
+  const { error } = await supabase.rpc("save_iup_player_assessment", {
+    p_plan_id: payload.planId,
+    p_now_state: payload.nowState,
+    p_self_assessment: payload.selfAssessment,
+    p_selected_review_point_id: payload.selectedReviewPointId || null,
+    p_review_now_state: payload.reviewNowState,
+    p_review_self_assessment: payload.reviewSelfAssessment,
+  });
+  if (error) {
+    return { ok: false, error: error.message };
+  }
+  return { ok: true };
+};
+
+export const createIupCheckin = async (payload: {
+  planId: string;
+  goalId?: string;
+  reviewPointId?: string;
+  note: string;
+  rating?: number;
+  authorRole: "coach" | "player" | "other";
+}): Promise<{ ok: true; checkinId: string } | { ok: false; error: string }> => {
+  if (!supabase) {
+    return { ok: false, error: "Supabase missing." };
+  }
+  const user = await getSessionUser();
+  if (!user) {
+    return { ok: false, error: "Not signed in." };
+  }
+  const { data, error } = await supabase
+    .from("iup_checkins")
+    .insert({
+      plan_id: payload.planId,
+      goal_id: payload.goalId ?? null,
+      review_point_id: payload.reviewPointId ?? null,
+      author_id: user.id,
+      author_role: payload.authorRole,
+      rating: typeof payload.rating === "number" ? payload.rating : null,
+      note: payload.note.trim(),
+    })
+    .select("id")
+    .single();
+  if (error) {
+    return { ok: false, error: error.message };
+  }
+  return { ok: true, checkinId: String(data.id) };
+};
+
+export const deleteIupCheckin = async (
+  checkinId: string
+): Promise<{ ok: true } | { ok: false; error: string }> => {
+  if (!supabase) {
+    return { ok: false, error: "Supabase missing." };
+  }
+  const { error } = await supabase.from("iup_checkins").delete().eq("id", checkinId);
   if (error) {
     return { ok: false, error: error.message };
   }

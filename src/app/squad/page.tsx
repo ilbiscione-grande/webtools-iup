@@ -21,6 +21,7 @@ type PlayerStatusFilter = "all" | "active" | "inactive";
 type PlayerForm = {
   teamId: string;
   name: string;
+  email: string;
   number: string;
   positionLabel: string;
   birthDate: string;
@@ -35,6 +36,7 @@ type PlayerForm = {
 const emptyForm: PlayerForm = {
   teamId: "",
   name: "",
+  email: "",
   number: "",
   positionLabel: "",
   birthDate: "",
@@ -49,6 +51,7 @@ const emptyForm: PlayerForm = {
 const toForm = (player: SquadPlayer): PlayerForm => ({
   teamId: player.teamId,
   name: player.name ?? "",
+  email: player.email ?? "",
   number: player.number > 0 ? String(player.number) : "",
   positionLabel: player.positionLabel ?? "",
   birthDate: player.birthDate ?? "",
@@ -103,8 +106,6 @@ export default function SquadPage() {
     () => players.find((player) => player.id === selectedPlayerId) ?? null,
     [players, selectedPlayerId]
   );
-
-  const teamNames = useMemo(() => teams, [teams]);
   const clubOptions = useMemo(() => {
     const seen = new Set<string>();
     return teams.flatMap((team) => {
@@ -267,6 +268,7 @@ export default function SquadPage() {
     const result = await createSquadPlayer({
       teamId: createForm.teamId,
       name: createForm.name,
+      email: createForm.email || undefined,
       number: createForm.number ? Number(createForm.number) : undefined,
       positionLabel: createForm.positionLabel,
       birthDate: createForm.birthDate || undefined,
@@ -299,6 +301,7 @@ export default function SquadPage() {
     setBusy(true);
     const result = await updateSquadPlayer(selectedPlayer.id, {
       name: editForm.name,
+      email: editForm.email || undefined,
       number: editForm.number ? Number(editForm.number) : undefined,
       positionLabel: editForm.positionLabel,
       birthDate: editForm.birthDate || undefined,
@@ -442,6 +445,14 @@ export default function SquadPage() {
                   }
                 />
                 <input
+                  type="email"
+                  placeholder={messages.squad.email}
+                  value={createForm.email}
+                  onChange={(event) =>
+                    setCreateForm((current) => ({ ...current, email: event.target.value }))
+                  }
+                />
+                <input
                   placeholder={messages.home.number}
                   value={createForm.number}
                   onChange={(event) =>
@@ -582,6 +593,14 @@ export default function SquadPage() {
                           }
                         />
                         <input
+                          type="email"
+                          placeholder={messages.squad.email}
+                          value={editForm.email}
+                          onChange={(event) =>
+                            setEditForm((current) => ({ ...current, email: event.target.value }))
+                          }
+                        />
+                        <input
                           placeholder={messages.home.number}
                           value={editForm.number}
                           onChange={(event) =>
@@ -598,6 +617,17 @@ export default function SquadPage() {
                               positionLabel: event.target.value,
                             }))
                           }
+                        />
+                      </div>
+                      <div className="row wrap">
+                        <input
+                          value={
+                            selectedPlayer.userId
+                              ? messages.squad.linkedAccount
+                              : messages.squad.notLinked
+                          }
+                          disabled
+                          className="input-medium"
                         />
                       </div>
                       <div className="row wrap">

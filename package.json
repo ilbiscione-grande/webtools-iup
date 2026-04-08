@@ -7,8 +7,10 @@
     "build": "next build",
     "start": "next start",
     "clean": "node scripts/clean-next.mjs",
+    "lint": "eslint .",
+    "smoke": "node --experimental-strip-types scripts/smoke-contracts.mjs",
     "typecheck": "tsc --noEmit",
-    "ci": "npm run typecheck && node scripts/build-ci.mjs"
+    "ci": "npm run lint && npm run typecheck && npm run smoke && node scripts/build-ci.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.90.1",
@@ -17,9 +19,13 @@
     "react-dom": "19.2.3"
   },
   "devDependencies": {
+    "@eslint/js": "^9.38.0",
     "@types/node": "^20.19.29",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "eslint": "^9.38.0",
+    "globals": "^16.4.0",
+    "typescript-eslint": "^8.46.1",
     "typescript": "^5"
   }
 }

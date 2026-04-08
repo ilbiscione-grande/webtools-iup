@@ -5,8 +5,10 @@ import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useI18n } from "@/lib/i18n";
 import {
+  claimMyPlayerLinks,
   createIupPlan,
   fetchIupPlansForPlayer,
+  fetchMyPlayerPlans,
   fetchPlayersInReviewPeriod,
   fetchPaidPlayers,
   fetchProfilePlan,
@@ -15,6 +17,7 @@ import {
   signInPassword,
   signOut,
   signUpPassword,
+  type MyPlayerPlanLite,
   type PaidPlayer,
   type PlanLevel,
   type TeamLite,
@@ -68,46 +71,60 @@ type ReviewCadence =
   | "bi_weekly"
   | "weekly";
 
-const reviewCadenceConfig: Record<
-  ReviewCadence,
-  { label: string; points: string[]; prefix?: string }
-> = {
+type Messages = ReturnType<typeof useI18n>["messages"];
+
+const getReviewCadenceConfig = (
+  messages: Messages
+): Record<ReviewCadence, { label: string; points: string[] }> => ({
   spring_fall: {
-    label: "Vår, Höst",
-    points: ["Vår", "Höst"],
+    label: messages.iup.cadenceSpringFall,
+    points: [messages.iup.reviewPointSpring, messages.iup.reviewPointFall],
   },
   spring_summer_fall: {
-    label: "Vår, Sommar, Höst",
-    points: ["Vår", "Sommar", "Höst"],
+    label: messages.iup.cadenceSpringSummerFall,
+    points: [
+      messages.iup.reviewPointSpring,
+      messages.iup.reviewPointSummer,
+      messages.iup.reviewPointFall,
+    ],
   },
   quarterly: {
-    label: "Kvartalsvis",
+    label: messages.iup.cadenceQuarterly,
     points: ["Q1", "Q2", "Q3", "Q4"],
   },
   bi_monthly: {
-    label: "Varannan månad",
-    points: Array.from({ length: 6 }, (_, idx) => `Varannan månad ${idx + 1}`),
-    prefix: "Varannan månad",
+    label: messages.iup.cadenceBiMonthly,
+    points: Array.from(
+      { length: 6 },
+      (_, idx) => `${messages.iup.reviewPrefixBiMonthly} ${idx + 1}`
+    ),
   },
   monthly: {
-    label: "Varje månad",
-    points: Array.from({ length: 12 }, (_, idx) => `Månad ${idx + 1}`),
-    prefix: "Månad",
+    label: messages.iup.cadenceMonthly,
+    points: Array.from(
+      { length: 12 },
+      (_, idx) => `${messages.iup.reviewPrefixMonth} ${idx + 1}`
+    ),
   },
   bi_weekly: {
-    label: "Varannan vecka",
-    points: Array.from({ length: 26 }, (_, idx) => `Varannan vecka ${idx + 1}`),
-    prefix: "Varannan vecka",
+    label: messages.iup.cadenceBiWeekly,
+    points: Array.from(
+      { length: 26 },
+      (_, idx) => `${messages.iup.reviewPrefixBiWeekly} ${idx + 1}`
+    ),
   },
   weekly: {
-    label: "Varje vecka",
-    points: Array.from({ length: 52 }, (_, idx) => `Vecka ${idx + 1}`),
-    prefix: "Vecka",
+    label: messages.iup.cadenceWeekly,
+    points: Array.from(
+      { length: 52 },
+      (_, idx) => `${messages.iup.reviewPrefixWeek} ${idx + 1}`
+    ),
   },
-};
+});
 
 export default function Page() {
   const { messages } = useI18n();
+  const reviewCadenceConfig = useMemo(() => getReviewCadenceConfig(messages), [messages]);
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -143,6 +160,8 @@ export default function Page() {
   >([]);
   const [selectedYear, setSelectedYear] = useState<string>("all");
   const [createDialogPlayer, setCreateDialogPlayer] = useState<PaidPlayer | null>(null);
+  const [myPlayerPlans, setMyPlayerPlans] = useState<MyPlayerPlanLite[]>([]);
+  const [myPlayerPlansLoading, setMyPlayerPlansLoading] = useState(false);
   const [createCycleType, setCreateCycleType] = useState<"year" | "season">("season");
   const [createCycleLabel, setCreateCycleLabel] = useState("");
   const [createPeriodStart, setCreatePeriodStart] = useState("");
@@ -160,8 +179,6 @@ export default function Page() {
     () => players.find((entry) => entry.id === selectedPlayerId) ?? null,
     [players, selectedPlayerId]
   );
-
-  const playerTeams = useMemo(() => teams, [teams]);
   const playerClubs = useMemo(() => {
     const seen = new Set<string>();
     return teams.flatMap((team) => {
@@ -218,6 +235,13 @@ export default function Page() {
       setPlayers([]);
       setSelectedPlayerId("");
       return;
+    }
+
+    const claimResult = await claimMyPlayerLinks();
+    if (!claimResult.ok) {
+      setStatus(claimResult.error);
+    } else if (claimResult.linkedCount > 0) {
+      setStatus(messages.home.playerLinksClaimed);
     }
 
     const planResult = await fetchProfilePlan();
@@ -324,6 +348,25 @@ export default function Page() {
       setSelectedPlayerId(players[0]?.id ?? "");
     }
   }, [players, selectedPlayerId]);
+
+  useEffect(() => {
+    const loadMyPlayerPlans = async () => {
+      if (!signedIn) {
+        setMyPlayerPlans([]);
+        return;
+      }
+      setMyPlayerPlansLoading(true);
+      const result = await fetchMyPlayerPlans();
+      setMyPlayerPlansLoading(false);
+      if (!result.ok) {
+        setStatus(result.error);
+        setMyPlayerPlans([]);
+        return;
+      }
+      setMyPlayerPlans(result.plans);
+    };
+    loadMyPlayerPlans();
+  }, [signedIn]);
 
   useEffect(() => {
     if (!isFree || typeof window === "undefined") {
@@ -537,6 +580,11 @@ export default function Page() {
   return (
     <main className="app-shell">
       <div className="iup-top-actions">
+        {signedIn ? (
+          <button type="button" className="iup-top-icon" onClick={onSignOut}>
+            {messages.home.signOut}
+          </button>
+        ) : null}
         <Link
           href="/settings"
           className="iup-top-icon"
@@ -601,14 +649,7 @@ export default function Page() {
             </button>
           </div>
         </section>
-      ) : (
-        <section className="card">
-          <div className="row row-between">
-            <h2 className="title-md">{messages.home.signedIn}</h2>
-            <button type="button" onClick={onSignOut}>{messages.home.signOut}</button>
-          </div>
-        </section>
-      )}
+      ) : null}
 
       {!isPaid ? (
         <section className="card">
@@ -693,6 +734,39 @@ export default function Page() {
         </section>
       ) : null}
 
+      {signedIn ? (
+        <section className="card">
+          <h3 className="section-h3">{messages.home.myIups}</h3>
+          <p className="muted">{messages.home.myIupsSubtitle}</p>
+          {myPlayerPlansLoading ? (
+            <p className="muted-line">{messages.common.loading}</p>
+          ) : myPlayerPlans.length === 0 ? (
+            <p className="muted-line">{messages.home.noMyIups}</p>
+          ) : (
+            <div className="goal-groups">
+              {myPlayerPlans.map((entry) => (
+                <button
+                  key={entry.id}
+                  type="button"
+                  className="card text-left"
+                  onClick={() => router.push(`/iup/${entry.id}`)}
+                >
+                  <strong>{entry.title}</strong>
+                  <div className="muted-sm">
+                    {entry.playerName}
+                    {entry.teamName ? ` · ${entry.teamName}` : ""}
+                  </div>
+                  <div className="muted-sm">
+                    {entry.status} · {new Date(entry.createdAt).toLocaleDateString()}
+                  </div>
+                  <div className="muted-sm">{messages.home.openIup}</div>
+                </button>
+              ))}
+            </div>
+          )}
+        </section>
+      ) : null}
+
       {isPaid ? (
         <section className="card card-strong">
           <div className="row row-between mb-8">
@@ -707,7 +781,7 @@ export default function Page() {
 
           <div className="row wrap mb-10">
             <input
-              placeholder="Sök namn, lag, position, nummer"
+              placeholder={messages.common.searchPlaceholder}
               value={playerSearch}
               onChange={(event) => setPlayerSearch(event.target.value)}
               className="input-wide"
@@ -947,13 +1021,13 @@ export default function Page() {
                 }
                 className="input-medium"
               >
-                <option value="spring_fall">Vår, Höst</option>
-                <option value="spring_summer_fall">Vår, Sommar, Höst</option>
-                <option value="quarterly">Kvartalsvis</option>
-                <option value="bi_monthly">Varannan månad</option>
-                <option value="monthly">Varje månad</option>
-                <option value="bi_weekly">Varannan vecka</option>
-                <option value="weekly">Varje vecka</option>
+                {(Object.entries(reviewCadenceConfig) as Array<
+                  [ReviewCadence, { label: string; points: string[] }]
+                >).map(([value, config]) => (
+                  <option key={value} value={value}>
+                    {config.label}
+                  </option>
+                ))}
               </select>
 
               <label className="muted">{messages.home.other}</label>

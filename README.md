@@ -1,74 +1,144 @@
-# Teamzone IUP Starter
+# Teamzone IUP
 
-Minimal Next.js starter for a separate IUP app, reusing the same Supabase project as Tactics Board.
+Next.js-app for individuella utvecklingsplaner kopplad till samma Supabase-projekt som Teamzone/Tactics Board.
 
-## 1. Install and run
+## Setup
+
+Installera beroenden och starta utvecklingsservern:
 
 ```bash
 npm install
 npm run dev
 ```
 
-## 2. Environment
+Miljövariabler:
 
-Copy `.env.example` to `.env.local` and fill values from your existing Supabase project.
+1. Kopiera `.env.example` till `.env.local`
+2. Fyll i Supabase-värden för samma projekt som övriga Teamzone-delar
 
-## 3. Database
+## Databas
 
-Run:
+Applicera schema i denna ordning:
 
-1. `supabase/schema.sql` (already used in your current app)
-2. `supabase/iup_schema.sql` (new IUP tables/policies)
+1. `supabase/schema.sql`
+2. `supabase/iup_schema.sql`
 
-The latest `iup_schema.sql` is aligned with the shared `profiles`, `clubs`, `club_members`, `teams`, `team_members` model from Tactics Board.
+`iup_schema.sql` är anpassad till den delade modellen med `profiles`, `clubs`, `club_members`, `teams` och `team_members`.
 
-Squad/player-specific fields are stored on `team_members`, with extra player profile data mapped through `team_members.metadata`.
+Spelarspecifika profilfält lagras på `team_members`, med kompletterande metadata i `team_members.metadata`.
 
-Current v1 access model for IUP is admin-scoped:
+## Produktnivåer
 
-- team owner
-- active team admin (`team_members.is_team_admin = true`)
-- active club admin for the club that owns the team
+`FREE`
 
-Regular team members are not part of the coach/admin IUP workflow in v1.
+- används utan inloggning
+- kan skapa och öppna tillfälliga IUP-utkast i nuvarande session
+- sparar utkast i `sessionStorage`
+- sparar egna målförslag i `localStorage`
+- har inte tillgång till trupphantering eller serverlagrade spelarflöden
 
-## 4. What this starter includes
+`AUTH`
 
-- Supabase auth (email + password)
-- Team list (shared teams via same membership model as Tactics Board)
-- IUP plans list per team
-- Create plan flow for one selected player in team
-- Basic structure for goals/check-ins persistence
+- används av inloggad användare utan `PAID`-truppflöde
+- kan skapa och öppna egna IUP:er och arbeta vidare i editorn
+- använder lokala utkast per användare på enheten som återställningsspår
+- sparar egna målförslag konto-bundet i databasen via `iup_goal_suggestions`
+- har inte tillgång till truppsidan eller lagadministration som kräver `PAID`
 
-## 5. Recommended next steps
+`PAID`
 
-1. Add role views (`coach` vs `player`).
-2. Add goal editing and check-in timeline UI.
-3. Tighten player role handling inside `team_members` and player self-service flows.
-4. Add notifications and reminders.
+- inkluderar allt i `AUTH`
+- låser upp trupphantering, spelare i databas och coachflödet kring lagets spelare
 
-## 6. Quality gate (Step 5)
+## Åtkomstmodell
 
-Use this before deploy/merge:
+IUP-flödet för coach/admin är admin-scope i v1.
+
+Det gäller:
+
+- lagägare
+- aktiv team-admin via `team_members.is_team_admin = true`
+- aktiv klubb-admin för lagets klubb
+
+Det gäller inte ännu:
+
+- vanliga teammedlemmar utan adminroll
+- spelare som bara är kopplade som medlem/användare
+
+## Det som finns i appen
+
+- Supabase auth med e-post/lösenord
+- startsida för `FREE`, `AUTH` och `PAID`
+- trupphantering för `PAID`
+- IUP-editor med nuläge, korta/långa mål, återkopplingspunkter och självskattning
+- check-in-tidslinje för coach och kopplad spelare, med koppling till mål och review points
+- lokaliserat UI för svenska och engelska
+- konto-bundna målförslag för inloggade användare
+- automatisk spelar-koppling via `team_members.email` -> `team_members.user_id` när spelaren loggar in med matchande e-post
+
+## Kvalitetsgrind
+
+Använd dessa kontroller före merge eller release:
+
+```bash
+npm run lint
+npm run typecheck
+npm run smoke
+```
+
+`npm run ci` kör samma steg följt av produktionsbuild:
 
 ```bash
 npm run ci
 ```
 
-This runs:
+`ci` innehåller nu:
 
-1. `npm run typecheck`
-2. `npm run build`
+1. `npm run lint`
+2. `npm run typecheck`
+3. `npm run smoke`
+4. `node scripts/build-ci.mjs`
 
-## 7. Manual smoke checklist
+## Smoke-test
 
-Run after DB migration and before release:
+`npm run smoke` är just nu ett lätt kontraktstest som verifierar:
 
-1. Open `/squad`
-2. Create a player (name, number, position, birth date)
-3. Edit the same player and save
-4. Archive and restore the player
-5. Open `/` and create a new IUP for that player
-6. Open `/iup/[id]`, edit fields/goals and save
-7. Confirm saved values after page reload
-8. Confirm archive/delete works for plan owner
+- att centrala scripts finns i `package.json`
+- att språkdata för kärnsidor finns
+- att målförslag har giltig grundstruktur
+
+Det är inte full browser-E2E ännu.
+
+## Kända begränsningar
+
+- `npm run ci` fallerar fortfarande lokalt på Windows i Next-builden trots att `lint`, `typecheck` och `smoke` passerar
+- observerade fel i lokal Windows-miljö:
+  - Turbopack: `EPERM` vid rename/unlink i build-output
+  - webpack: `spawn EPERM`
+  - webpack + worker threads: `DataCloneError`
+- spelarkonto-koppling kräver fortfarande att coachen sparar rätt spelare-post med rätt e-postadress i squad-vyn
+- rollflöden för coach respektive spelare är inte färdigproduktifierade
+
+## Manuell kontrollista
+
+Kör detta efter DB-migrering och före release:
+
+1. Öppna `/`
+2. Verifiera `FREE`-flöde för temporärt utkast
+3. Logga in och verifiera `AUTH`-flöde
+4. Öppna `/squad` som `PAID` och skapa spelare
+5. Redigera samma spelare och spara
+6. Skapa ny IUP för vald spelare
+7. Öppna `/iup/[id]`, redigera fält/mål och spara
+8. Ladda om sidan och verifiera sparade värden
+9. Lägg till och ta bort en check-in på planen
+10. Verifiera att spelare med matchande e-post får sin koppling efter inloggning
+11. Verifiera arkivera/ta bort för planägare
+
+## Nästa steg
+
+1. få `npm run ci` grönt även i lokal Windows-miljö
+2. lägg till full browser-E2E när buildblockeraren inte längre styr teststrategin
+3. bygg riktiga rollflöden för coach och spelare
+4. fördjupa check-ins med bättre uppföljningsdialog eller historikvy
+5. bygg tydligare invite/link-UI ovanpå spelarkopplingen

@@ -1,0 +1,9 @@
+{
+  "/_global-error/page": "app/_global-error/page.js",
+  "/_not-found/page": "app/_not-found/page.js",
+  "/iup/local/[id]/page": "app/iup/local/[id]/page.js",
+  "/page": "app/page.js",
+  "/iup/[id]/page": "app/iup/[id]/page.js",
+  "/settings/page": "app/settings/page.js",
+  "/squad/page": "app/squad/page.js"
+}

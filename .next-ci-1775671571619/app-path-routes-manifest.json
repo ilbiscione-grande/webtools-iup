@@ -1,0 +1,9 @@
+{
+  "/_not-found/page": "/_not-found",
+  "/_global-error/page": "/_global-error",
+  "/page": "/",
+  "/settings/page": "/settings",
+  "/iup/[id]/page": "/iup/[id]",
+  "/iup/local/[id]/page": "/iup/local/[id]",
+  "/squad/page": "/squad"
+}
